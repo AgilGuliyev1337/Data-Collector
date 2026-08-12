@@ -357,6 +357,50 @@ def discover_catalogue_cmd(cfg, source_id: str = None):
     print(f"  Run ID: {result.get('run_id')}")
 
 
+def query_cmd(cfg: dict, query_text: str, current_year: int = 2025):
+    """Execute a natural language query through the full pipeline."""
+    from collector.orchestrator import run_query
+
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+
+    try:
+        result = run_query(conn, query_text, current_year=current_year)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Sorgu xətası: {e}")
+        import traceback
+        traceback.print_exc()
+        conn.close()
+        return
+
+    conn.close()
+
+    # Print summary
+    print(f"\n=== Query: {query_text} ===")
+    print(f"\nParsed:")
+    print(f"  Concepts: {result['parsed']['concepts']}")
+    print(f"  Countries: {result['parsed']['countries']}")
+    print(f"  Period: {result['parsed']['period_start']} - {result['parsed']['period_end']}")
+
+    print(f"\nPlan: {json.dumps(result['plan'], indent=2, ensure_ascii=False)[:500]}")
+
+    print(f"\nResults ({result['metadata']['total_points']} points, "
+          f"{result['metadata']['valid_points']} valid):")
+    for r in result['results']:
+        print(f"  [{r['status']}] {r['indicator_code']} "
+              f"({r['source_id']}): value={r['value']}, "
+              f"original={r.get('original_value')}")
+
+    print(f"\nCross-source quality: {result['cross_source_quality']['quality']}")
+
+    # Print full JSON
+    print(f"\n=== Full JSON Response ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Universal Open-Data Collector")
     parser.add_argument("--config", default="config.yaml")
@@ -384,6 +428,11 @@ def main():
 
     parser.add_argument("--discover-catalogue", action="store_true",
                          help="Discover and index catalogue entries from enabled sources")
+
+    parser.add_argument("--query", metavar="QUERY_TEXT",
+                         help="Ask a natural language question (full pipeline: parse → plan → collect → normalize → validate → report)")
+    parser.add_argument("--year", type=int, default=2025,
+                         help="Reference year for period parsing (default: 2025)")
 
     args = parser.parse_args()
 
@@ -421,6 +470,8 @@ def main():
         run(cfg, only_id=args.source)
     elif args.discover_catalogue:
         discover_catalogue_cmd(cfg, source_id=args.source)
+    elif args.query:
+        query_cmd(cfg, args.query, current_year=args.year)
     else:
         parser.print_help()
         sys.exit(0)
