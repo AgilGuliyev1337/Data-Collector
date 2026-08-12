@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime artifacts, not source
+data/
+*.log
+
+# Claude Code session/local state
+.claude/
+
+# IDE/OS
+.DS_Store
+.vscode/
+.idea/

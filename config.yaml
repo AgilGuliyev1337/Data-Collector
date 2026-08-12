@@ -1,0 +1,109 @@
+# ============================================================
+# DATA SOURCES CONFIG
+# Yeni mənbə əlavə etmək üçün sadəcə aşağıya yeni "source" blok
+# əlavə et. Kod dəyişmək lazım deyil.
+# ============================================================
+
+sources:
+
+  - id: opendata_az
+    type: ckan
+    base_url: https://admin.opendata.az
+    # filter: boşdursa hamısını çəkir, doldursan yalnız uyğun
+    # tag/qrup üzrə süzgəcdən keçirir (CKAN group_list ilə uyğun olmalıdır)
+    filter:
+      groups: []        # məs: ["trade", "population"] - boş = hamısı
+      tags: []           # məs: ["external_trade"] - boş = hamısı
+    # yalnız açıq lisenziyalı (cc-zero, cc-by və s.) datasetləri saxla
+    require_open_license: true
+    rate_limit_per_sec: 2
+    enabled: true
+
+  # ABŞ-ın rəsmi açıq-data portalı (CKAN)
+  - id: data_gov_us
+    type: ckan
+    base_url: https://catalog.data.gov
+    filter:
+      groups: []
+      tags: []
+    require_open_license: false   # data.gov-da license_id sahəsi çox vaxt boşdur, əl ilə yoxla
+    rate_limit_per_sec: 2
+    enabled: false   # default deaktiv - kataloq çox böyükdür (300k+ dataset), əvvəlcə filter təyin et
+
+  # Avropa Komissiyasının aqreqasiya edilmiş portalı
+  # QEYD: data.europa.eu köhnə CKAN API-ni deaktiv edib, "hub/search" adlı
+  # yeni API istifadə edir - fərqli struktur, ayrıca adapter tələb edir
+  # (hələ yazılmayıb, bu blok yalnız qeyd üçündür)
+  # - id: data_europa_eu
+  #   type: ckan  # YANLIŞDIR - hub/search API fərqlidir, işləməyəcək
+  #   base_url: https://data.europa.eu
+  #   enabled: false
+
+sources_note: |
+  Makro-səviyyəli (ölkə/region) müqayisə üçün world_bank, eurostat, imf, cbr_russia
+  mənbələri collector/*.py modullarında ayrıca yazılıb (CKAN deyil, hər birinin
+  öz API strukturu var). Onları --compare, --cross-check, --cbr-snapshot ilə
+  işlədirsən, config-də "sources:" siyahısında görünmürlər.
+
+# ============================================================
+# REGIONLAR - müqayisə üçün ölkə qrupları (ISO3 kodlar).
+# Yeni ölkə/region əlavə etmək üçün sadəcə siyahıya kod əlavə et.
+# Bütün kodlar: https://api.worldbank.org/v2/country?format=json&per_page=300
+# ============================================================
+regions:
+  azerbaijan:
+    - AZE
+
+  europe:
+    - DEU   # Almaniya
+    - FRA   # Fransa
+    - GBR   # B.Britaniya
+    - NLD   # Hollandiya
+    - POL   # Polşa
+    - TUR   # Türkiyə (coğrafi/iqtisadi əlaqəyə görə)
+
+  america:
+    - USA
+    - CAN
+
+  cis:
+    - RUS   # Rusiya
+    - KAZ   # Qazaxıstan
+    - UZB   # Özbəkistan
+    - BLR   # Belarus
+    - ARM   # Ermənistan
+    - KGZ   # Qırğızıstan
+    - TJK   # Tacikistan
+
+# ============================================================
+# ÇARPAZ-MÜQAYİSƏ ÜÇÜN KONSEPT XƏRİTƏSİ
+# Eyni məfhum (məs. "gdp_growth") müxtəlif mənbələrdə fərqli kodla
+# saxlanılır. Burada hər konsept üçün mənbə-spesifik kodu təyin edirik.
+# DİQQƏT: eurostat/imf kodlarını əlavə etməzdən/istifadə etməzdən əvvəl
+# rəsmi query builder-lə YOXLA - bu nümunələr ilkin təxmindir və
+# canlı sistemdə mütləq təsdiqlənməlidir.
+# ============================================================
+concepts:
+  gdp_growth:
+    world_bank: NY.GDP.MKTP.KD.ZG
+    eurostat: sdg_08_10          # "Real GDP per capita, growth rate" - yoxla!
+    imf:
+      dataset: IFS
+      key_template: "A.{country}.NGDP_R_XDC"   # illik, real GDP, milli valyuta
+
+  unemployment:
+    world_bank: SL.UEM.TOTL.ZS
+    eurostat: une_rt_a           # illik işsizlik səviyyəsi - yoxla!
+
+  inflation:
+    world_bank: FP.CPI.TOTL.ZG
+    eurostat: prc_hicp_manr      # HICP illik dəyişmə - yoxla!
+
+storage:
+  backend: sqlite          # sqlite | csv
+  sqlite_path: data/collector.db
+  csv_dir: data/csv
+
+logging:
+  level: INFO
+  file: data/collector.log
