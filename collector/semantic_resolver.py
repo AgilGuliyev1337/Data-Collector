@@ -112,7 +112,7 @@ SYNONYM_DICT: dict[str, dict] = {
     },
     "population": {
         "display_name": "Total Population",
-        "az": {"nəfər", "populyasiya", "population", "total population"},
+        "az": {"nəfər", "ehali", "populyasiya", "population", "total population"},
         "en": {
             "population",
             "total population",
@@ -120,7 +120,7 @@ SYNONYM_DICT: dict[str, dict] = {
             "inhabitants",
             "pop",
         },
-        "keywords": {"nefer", "nfe", "populat", "population", "people", "inhabitant", "pop"},
+        "keywords": {"nefer", "nfe", "ehali", "populat", "population", "people", "inhabitant", "pop"},
     },
     "internet_users": {
         "display_name": "Internet Users",
