@@ -30,7 +30,7 @@ def _period_year(period) -> int:
 
 
 def upsert_source(conn, id, type, base_url=None, discovery_method="static",
-                   priority_tier=None, trust_level="official", enabled=True, metadata=None):
+                  priority_tier=None, trust_level="official", enabled=True, metadata=None):
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -154,3 +154,232 @@ def upsert_fx_rates(conn, rows: list):
             """,
             values,
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B: Concept → Indicator Mapping — Seed Data & Functions
+# ---------------------------------------------------------------------------
+
+# Konsept adları (insan üçün göstərilən, sabit)
+CONCEPT_DISPLAY_NAMES = {
+    "gdp_growth": "GDP Growth Rate",
+    "unemployment": "Unemployment Rate",
+    "inflation": "Inflation Rate",
+    "gdp": "Gross Domestic Product",
+    "gdp_per_capita": "GDP Per Capita",
+    "population": "Total Population",
+    "internet_users": "Internet Users",
+    "mobile_subscriptions": "Mobile Subscriptions",
+    "exports": "Total Exports",
+    "imports": "Total Imports",
+    "fdi_inflow": "Foreign Direct Investment Inflow",
+    "life_expectancy": "Life Expectancy",
+    "co2_emissions": "CO2 Emissions Per Capita",
+    "urban_population_pct": "Urban Population Percentage",
+    "researchers_per_million": "Researchers Per Million",
+    "ease_of_business": "Ease of Doing Business",
+}
+
+# Config.yaml → concepts bölməsindəki REAL kodlar.
+# Eurostat kodları "yoxla!" qeydi ilə — real sistemdə təsdiq edilməlidir.
+CONFIG_YAML_CONCEPTS = {
+    "gdp_growth": {
+        "world_bank": {"indicator_code": "NY.GDP.MKTP.KD.ZG"},
+        "eurostat":   {"indicator_code": "sdg_08_10", "dataset_id": "sdg_08_10"},
+    },
+    "unemployment": {
+        "world_bank": {"indicator_code": "SL.UEM.TOTL.ZS"},
+        "eurostat":   {"indicator_code": "une_rt_a", "dataset_id": "une_rt_a"},
+    },
+    "inflation": {
+        "world_bank": {"indicator_code": "FP.CPI.TOTL.ZG"},
+        "eurostat":   {"indicator_code": "prc_hicp_manr", "dataset_id": "prc_hicp_manr"},
+    },
+}
+
+# World Bank COMMON_INDICATORS (WorldBankSource.Common_INDICATORS-dan).
+# Bu göstəricilərin hamısı World Bank Open Data API-də REAL mövcuddur.
+WB_COMMON_INDICATORS = {
+    "gdp":                    {"indicator_code": "NY.GDP.MKTP.CD",
+                                "unit": "USD", "frequency": "annual"},
+    "gdp_per_capita":         {"indicator_code": "NY.GDP.PCAP.CD",
+                                "unit": "USD", "frequency": "annual"},
+    "gdp_growth":             {"indicator_code": "NY.GDP.MKTP.KD.ZG",
+                                "unit": "percent", "frequency": "annual"},
+    "population":             {"indicator_code": "SP.POP.TOTL",
+                                "unit": "people", "frequency": "annual"},
+    "unemployment":           {"indicator_code": "SL.UEM.TOTL.ZS",
+                                "unit": "percent", "frequency": "annual"},
+    "inflation":              {"indicator_code": "FP.CPI.TOTL.ZG",
+                                "unit": "percent", "frequency": "annual"},
+    "internet_users":         {"indicator_code": "IT.NET.USER.ZS",
+                                "unit": "percent", "frequency": "annual"},
+    "mobile_subscriptions":   {"indicator_code": "IT.CEL.SETS.P2",
+                                "unit": "per 100 people", "frequency": "annual"},
+    "exports":                {"indicator_code": "NE.EXP.GNFS.CD",
+                                "unit": "USD", "frequency": "annual"},
+    "imports":                {"indicator_code": "NE.IMP.GNFS.CD",
+                                "unit": "USD", "frequency": "annual"},
+    "fdi_inflow":             {"indicator_code": "BX.KLT.DINV.CD.WD",
+                                "unit": "USD", "frequency": "annual"},
+    "life_expectancy":        {"indicator_code": "SP.DYN.LE00.IN",
+                                "unit": "years", "frequency": "annual"},
+    "co2_emissions":          {"indicator_code": "EN.ATM.CO2E.PC",
+                                "unit": "tonnes per capita", "frequency": "annual"},
+    "urban_population_pct":   {"indicator_code": "SP.URB.TOTL.IN.ZS",
+                                "unit": "percent", "frequency": "annual"},
+    "researchers_per_million": {"indicator_code": "SP.POP.SCIE.RD.P6",
+                                "unit": "per million people", "frequency": "annual"},
+    "ease_of_business":       {"indicator_code": "IC.BUS.EASE.XQ",
+                                "unit": "score", "frequency": "annual"},
+}
+
+
+def _catalogue_entry_id(source_id: str, indicator_code: str) -> str:
+    """Deterministik entry_id: 'source_id:indicator_code'."""
+    return f"{source_id}:{indicator_code}"
+
+
+def ensure_catalogue_and_mapping(conn):
+    """Concepts, catalogue_entries və concept_indicator_map əldə et.
+
+    Mənbə:
+    1. Config.yaml-dan 3 konsept → world_bank + eurostat mapping-ləri
+    2. World Bank COMMON_INDICATORS-dan 15 konsept → world_bank mapping-ləri
+       (config.yaml-dakı 3 konsept WB ilə üst-üstə düşür → idempotent)
+
+    İDEMPOTENT: ON CONFLICT DO UPDATE ilə təhlükəsiz təkrar çağırış.
+    sources cədvəlinə world_bank/eurostat statik sətirlərini də yaradır
+    (FK asılılığı üçün — mövcuddursa skip).
+
+    Hər addım AYRI cursor-da işlənir: PostgreSQL-də bir INSERT xəta versə belə
+    transaction 'aborted' olmur — növbəti addımlar davam edir.
+    Commit etmir.
+    """
+    # Öncə sources cədvəlini doldur (FK asılılığı üçün)
+    ensure_static_sources(conn)
+
+    # Addım 1: Concepts
+    with conn.cursor() as cur:
+        for concept_id, display_name in CONCEPT_DISPLAY_NAMES.items():
+            cur.execute(
+                """
+                INSERT INTO concepts (concept_id, display_name)
+                VALUES (%s, %s)
+                ON CONFLICT (concept_id) DO UPDATE
+                    SET display_name = EXCLUDED.display_name
+                """,
+                (concept_id, display_name),
+            )
+
+    # Addım 2: Catalogue entries (config.yaml WB)
+    with conn.cursor() as cur:
+        for concept_id, sources in CONFIG_YAML_CONCEPTS.items():
+            wb_data = sources.get("world_bank")
+            if not wb_data:
+                continue
+            code = wb_data["indicator_code"]
+            entry_id = _catalogue_entry_id("world_bank", code)
+            display = CONCEPT_DISPLAY_NAMES.get(concept_id, "")
+            cur.execute(
+                """
+                INSERT INTO catalogue_entries
+                    (entry_id, source_id, dataset_id, indicator_code, title,
+                     description, unit, frequency)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    unit = EXCLUDED.unit,
+                    frequency = EXCLUDED.frequency,
+                    updated_at = now()
+                """,
+                (entry_id, "world_bank", None, code,
+                 display, f"World Bank indicator: {code}",
+                 WB_COMMON_INDICATORS.get(concept_id, {}).get("unit"),
+                 WB_COMMON_INDICATORS.get(concept_id, {}).get("frequency")),
+            )
+
+    # Addım 3: Catalogue entries (config.yaml Eurostat)
+    with conn.cursor() as cur:
+        for concept_id, sources in CONFIG_YAML_CONCEPTS.items():
+            es_data = sources.get("eurostat")
+            if not es_data:
+                continue
+            code = es_data["indicator_code"]
+            dataset_id = es_data.get("dataset_id", code)
+            entry_id = _catalogue_entry_id("eurostat", code)
+            display = CONCEPT_DISPLAY_NAMES.get(concept_id, "")
+            cur.execute(
+                """
+                INSERT INTO catalogue_entries
+                    (entry_id, source_id, dataset_id, indicator_code, title,
+                     description)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    updated_at = now()
+                """,
+                (entry_id, "eurostat", dataset_id, code,
+                 display, f"Eurostat dataset: {code}"),
+            )
+
+    # Addım 4: Catalogue entries (WB COMMON_INDICATORS — qalan 12 konsept)
+    with conn.cursor() as cur:
+        for concept_id, wb_info in WB_COMMON_INDICATORS.items():
+            code = wb_info["indicator_code"]
+            entry_id = _catalogue_entry_id("world_bank", code)
+            display = CONCEPT_DISPLAY_NAMES.get(concept_id, "")
+            cur.execute(
+                """
+                INSERT INTO catalogue_entries
+                    (entry_id, source_id, dataset_id, indicator_code, title,
+                     description, unit, frequency)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    unit = EXCLUDED.unit,
+                    frequency = EXCLUDED.frequency,
+                    updated_at = now()
+                """,
+                (entry_id, "world_bank", None, code,
+                 display, f"World Bank indicator: {code}",
+                 wb_info.get("unit"), wb_info.get("frequency")),
+            )
+
+    # Addım 5: concept_indicator_map (WB COMMON_INDICATORS — 0.90)
+    with conn.cursor() as cur:
+        for concept_id, wb_info in WB_COMMON_INDICATORS.items():
+            code = wb_info["indicator_code"]
+            entry_id = _catalogue_entry_id("world_bank", code)
+            cur.execute(
+                """
+                INSERT INTO concept_indicator_map
+                    (concept_id, entry_id, confidence, match_type)
+                VALUES (%s, %s, %s, 'rule_based')
+                ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+                    confidence = EXCLUDED.confidence,
+                    match_type = EXCLUDED.match_type
+                """,
+                (concept_id, entry_id, 0.90),
+            )
+
+    # Addım 6: concept_indicator_map (config.yaml — 0.95, üst yazır)
+    with conn.cursor() as cur:
+        for concept_id, sources in CONFIG_YAML_CONCEPTS.items():
+            for source_id, src_data in sources.items():
+                code = src_data["indicator_code"]
+                entry_id = _catalogue_entry_id(source_id, code)
+                cur.execute(
+                    """
+                    INSERT INTO concept_indicator_map
+                        (concept_id, entry_id, confidence, match_type)
+                    VALUES (%s, %s, %s, 'rule_based')
+                    ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+                        confidence = EXCLUDED.confidence,
+                        match_type = EXCLUDED.match_type
+                    """,
+                    (concept_id, entry_id, 0.95),
+                )

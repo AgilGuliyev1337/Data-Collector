@@ -115,3 +115,61 @@ def register_discovered(conn, source_id, source_type, base_url,
                 psycopg2.extras.Json(metadata or {}),
             ),
         )
+
+
+def list_concepts(conn):
+    """Bütün konseptləri qaytar.
+
+    Args:
+        conn: psycopg2 connection (commit etmir).
+
+    Returns:
+        Siyahı: [{concept_id, display_name}, ...] — concept_id üzrə sıralı.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT concept_id, display_name FROM concepts ORDER BY concept_id"
+        )
+        rows = cur.fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_candidate_indicators(conn, concept_id):
+    """Verilmiş konseptin BÜTÜN candidate indicator-lərini qaytar.
+
+    Sıralama:
+    1. source `priority_tier` ASC (daha yüksək prioritet əvvəldə)
+    2. `confidence` DESC (daha etibarlı mapping əvvəldə)
+    3. `entry_id` — stabil tie-breaker
+
+    Nəticə:
+    [{entry_id, source_id, indicator_code, dataset_id, title,
+      confidence, match_type, priority_tier, trust_level, unit,
+      frequency, country_coverage, time_coverage_start, time_coverage_end}, ...]
+
+    Args:
+        conn: psycopg2 connection (commit etmir).
+        concept_id: konseptin `concept_id` sahəsi.
+
+    Returns:
+        Siyahı (boş ola bilər — mapping yoxdursa).
+    """
+    query = """
+        SELECT
+            ce.entry_id, ce.source_id, ce.indicator_code, ce.dataset_id,
+            ce.title, ce.description, ce.unit, ce.frequency,
+            ce.country_coverage, ce.time_coverage_start, ce.time_coverage_end,
+            cim.confidence, cim.match_type,
+            s.priority_tier, s.trust_level
+        FROM catalogue_entries ce
+        JOIN concept_indicator_map cim ON cim.entry_id = ce.entry_id
+        JOIN sources s ON s.id = ce.source_id
+        WHERE cim.concept_id = %s
+        ORDER BY s.priority_tier ASC NULLS LAST,
+                 cim.confidence DESC,
+                 ce.entry_id ASC
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(query, (concept_id,))
+        rows = cur.fetchall()
+    return [dict(row) for row in rows]
