@@ -530,7 +530,7 @@ def seed_concept_mappings_from_synonyms(conn, confidence_threshold: float = 0.80
     # Pre-filter: only entries not yet mapped
     with conn.cursor() as cur:
         cur.execute("SELECT DISTINCT entry_id FROM concept_indicator_map")
-        already_mapped = {row["entry_id"] for row in cur.fetchall()}
+        already_mapped = {row[0] for row in cur.fetchall()}
 
     new_mappings = 0
 
@@ -576,7 +576,7 @@ def generate_resolver_report(
     # Already mapped entries
     with conn.cursor() as cur:
         cur.execute("SELECT DISTINCT entry_id FROM concept_indicator_map")
-        already_mapped = {row["entry_id"] for row in cur.fetchall()}
+        already_mapped = {row[0] for row in cur.fetchall()}
 
     # Resolve all entries
     results = resolve_catalogue_entries(entries)
