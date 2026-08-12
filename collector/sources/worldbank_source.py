@@ -13,6 +13,8 @@ import logging
 import urllib.request
 from urllib.parse import urlencode
 
+from collector.sources.base import DataSource
+
 logger = logging.getLogger("collector.worldbank")
 
 BASE_URL = "https://api.worldbank.org/v2"
@@ -39,11 +41,22 @@ COMMON_INDICATORS = {
 }
 
 
-class WorldBankSource:
+class WorldBankSource(DataSource):
     def __init__(self, source_cfg: dict = None):
         # ayrıca konfiqurasiya tələb etmir, amma digər source-larla
         # eyni interfeysə uyğun olsun deyə source_cfg qəbul edir
         self.id = "world_bank"
+
+    # ---------- DataSource ABC ----------
+    def validate_connection(self) -> bool:
+        rows = self._get("country/AZE/indicator/NY.GDP.MKTP.CD", {"per_page": 1})
+        return bool(rows)
+
+    def fetch(self, **kwargs):
+        return self.compare(
+            kwargs["country_codes"], kwargs["indicator"],
+            kwargs["start_year"], kwargs["end_year"],
+        )
 
     def _get(self, path: str, params: dict) -> list:
         params = dict(params)

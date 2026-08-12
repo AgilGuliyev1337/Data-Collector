@@ -15,14 +15,32 @@ import json
 import logging
 import urllib.request
 
+from collector.sources.base import DataSource
+
 logger = logging.getLogger("collector.cbr")
 
 DAILY_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
 
 
-class CBRSource:
+class CBRSource(DataSource):
+    """
+    QEYD: bu adapter digərlərindən (WorldBank/Eurostat/IMF) fərqli formadadır.
+    Digərləri {country, indicator, year, value} formalı ÇOX İLLİK göstərici
+    sıraları qaytarır; CBR isə indicator/country oxu OLMAYAN, bir günün FX
+    "snapshot"-unu qaytarır (currency, nominal, value_rub, date). Ona görə
+    bu adapterin nəticələri `facts` cədvəlinə YOX, ayrıca `fx_rates`
+    cədvəlinə yazılır (bax: migrations/0001_init.sql, collector/db/repository.py).
+    """
+
     def __init__(self, source_cfg: dict = None):
         self.id = "cbr_russia"
+
+    # ---------- DataSource ABC ----------
+    def validate_connection(self) -> bool:
+        return bool(self.get_daily_rates())
+
+    def fetch(self, **kwargs):
+        return self.get_daily_rates()
 
     def get_daily_rates(self) -> list:
         """

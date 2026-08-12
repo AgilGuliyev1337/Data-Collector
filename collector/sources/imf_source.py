@@ -17,14 +17,26 @@ import logging
 import urllib.request
 from urllib.parse import urlencode
 
+from collector.sources.base import DataSource
+
 logger = logging.getLogger("collector.imf")
 
 BASE_URL = "http://dataservices.imf.org/REST/SDMX_JSON.svc"
 
 
-class IMFSource:
+class IMFSource(DataSource):
     def __init__(self, source_cfg: dict = None):
         self.id = "imf"
+
+    # ---------- DataSource ABC ----------
+    def validate_connection(self) -> bool:
+        return bool(self.list_dataflows())
+
+    def fetch(self, **kwargs):
+        return self.get_series(
+            kwargs["dataset"], kwargs["key"],
+            kwargs["start_year"], kwargs["end_year"],
+        )
 
     def _get(self, path: str, params: dict = None) -> dict:
         url = f"{BASE_URL}/{path}"

@@ -15,14 +15,27 @@ import logging
 import urllib.request
 from urllib.parse import urlencode
 
+from collector.sources.base import DataSource
+
 logger = logging.getLogger("collector.eurostat")
 
 BASE_URL = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
 
 
-class EurostatSource:
+class EurostatSource(DataSource):
     def __init__(self, source_cfg: dict = None):
         self.id = "eurostat"
+
+    # ---------- DataSource ABC ----------
+    def validate_connection(self) -> bool:
+        raw = self._get("une_rt_a", {"geo": ["DE"], "sinceTimePeriod": 2020})
+        return bool(raw and "value" in raw)
+
+    def fetch(self, **kwargs):
+        return self.get_indicator(
+            kwargs["dataset"], kwargs["geo_codes"],
+            kwargs["start_year"], kwargs["end_year"],
+        )
 
     def _get(self, dataset: str, params: dict) -> dict:
         params = dict(params)

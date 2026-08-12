@@ -13,25 +13,42 @@ import urllib.request
 import json
 from urllib.parse import urlencode
 
+from collector.sources.base import DataSource
+
 logger = logging.getLogger("collector.ckan")
 
 
-class CKANSource:
+class CKANSource(DataSource):
     def __init__(self, source_cfg: dict):
         self.id = source_cfg["id"]
         self.base_url = source_cfg["base_url"].rstrip("/")
         self.filter = source_cfg.get("filter", {}) or {}
         self.require_open_license = source_cfg.get("require_open_license", True)
-        self.rate_limit = source_cfg.get("rate_limit_per_sec", 2)
+        self.rate_limit_per_sec = source_cfg.get("rate_limit_per_sec", 2)
+        self.priority_tier = source_cfg.get("priority_tier")
+        self.trust_level = source_cfg.get("trust_level", "official")
         self._last_call = 0.0
 
     # ---------- aşağı səviyyəli HTTP köməkçisi ----------
     def _throttle(self):
         elapsed = time.time() - self._last_call
-        min_gap = 1.0 / max(self.rate_limit, 0.1)
+        min_gap = 1.0 / max(self.rate_limit_per_sec, 0.1)
         if elapsed < min_gap:
             time.sleep(min_gap - elapsed)
         self._last_call = time.time()
+
+    # ---------- DataSource ABC ----------
+    def validate_connection(self) -> bool:
+        return bool(self._api_get("status_show"))
+
+    def fetch(self, **kwargs):
+        return list(self.collect())
+
+    def metadata(self) -> dict:
+        return {"id": self.id, "type": "ckan", "base_url": self.base_url}
+
+    def rate_limit(self):
+        return self.rate_limit_per_sec
 
     def _api_get(self, action: str, params: dict = None) -> dict:
         self._throttle()
