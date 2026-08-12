@@ -399,3 +399,157 @@ def ensure_catalogue_and_mapping(conn):
                     """,
                     (concept_id, entry_id, 0.95),
                 )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Catalogue Discovery Functions
+# ---------------------------------------------------------------------------
+
+
+def upsert_catalogue_entry(conn, entry: dict):
+    """Upsert into catalogue_entries. ON CONFLICT (source_id, indicator_code) → UPDATE."""
+    country = entry.get("country_coverage")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO catalogue_entries
+                (entry_id, source_id, dataset_id, indicator_code, title,
+                 description, unit, frequency, country_coverage,
+                 time_coverage_start, time_coverage_end, methodology_note)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                entry_id = EXCLUDED.entry_id,
+                dataset_id = EXCLUDED.dataset_id,
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                unit = EXCLUDED.unit,
+                frequency = EXCLUDED.frequency,
+                country_coverage = EXCLUDED.country_coverage,
+                time_coverage_start = EXCLUDED.time_coverage_start,
+                time_coverage_end = EXCLUDED.time_coverage_end,
+                methodology_note = EXCLUDED.methodology_note,
+                updated_at = now()
+            """,
+            (
+                entry.get("entry_id"),
+                entry.get("source_id"),
+                entry.get("dataset_id"),
+                entry.get("indicator_code"),
+                entry.get("title"),
+                entry.get("description"),
+                entry.get("unit"),
+                entry.get("frequency"),
+                country if country else None,  # TEXT[]: pass list or NULL
+                entry.get("time_coverage_start"),
+                entry.get("time_coverage_end"),
+                entry.get("methodology_note"),
+            ),
+        )
+
+
+def get_catalogue_entries_by_source(conn, source_id) -> list[dict]:
+    """SELECT * FROM catalogue_entries WHERE source_id=%s ORDER BY entry_id."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM catalogue_entries WHERE source_id = %s ORDER BY entry_id",
+            (source_id,),
+        )
+        rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_catalogue_entry_by_id(conn, entry_id) -> dict | None:
+    """SELECT * FROM catalogue_entries WHERE entry_id=%s."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM catalogue_entries WHERE entry_id = %s",
+            (entry_id,),
+        )
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_catalogue_entries_by_indicator(conn, indicator_code) -> list[dict]:
+    """SELECT * FROM catalogue_entries WHERE indicator_code=%s ORDER BY entry_id."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM catalogue_entries WHERE indicator_code = %s ORDER BY entry_id",
+            (indicator_code,),
+        )
+        rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def link_concept_to_entry(conn, concept_id, entry_id, confidence, match_type="rule_based"):
+    """INSERT INTO concept_indicator_map ON CONFLICT → skip if new confidence < existing.
+
+    ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+        confidence = CASE WHEN EXCLUDED.confidence > confidence
+                         THEN EXCLUDED.confidence ELSE confidence END,
+        match_type = EXCLUDED.match_type
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO concept_indicator_map
+                (concept_id, entry_id, confidence, match_type)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+                confidence = CASE WHEN EXCLUDED.confidence > concept_indicator_map.confidence
+                                  THEN EXCLUDED.confidence
+                                  ELSE concept_indicator_map.confidence END,
+                match_type = EXCLUDED.match_type
+            """,
+            (concept_id, entry_id, confidence, match_type),
+        )
+
+
+def seed_auto_concept_mappings(conn) -> int:
+    """
+    For all catalogue entries without ANY concept mapping,
+    attempt heuristic matching against CONCEPT_DISPLAY_NAMES.
+
+    Heuristic: title/description contains display_name (case-insensitive).
+    Returns count of new mappings created.
+    Confidence = 0.70 (below seeded 0.90/0.95).
+    Does NOT overwrite existing mappings.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # 1. Find entries without any mapping
+        cur.execute(
+            """
+            SELECT ce.entry_id, ce.title, ce.description
+            FROM catalogue_entries ce
+            WHERE ce.entry_id NOT IN (
+                SELECT DISTINCT cim.entry_id FROM concept_indicator_map cim
+            )
+            """
+        )
+        unmapped = cur.fetchall()
+
+    if not unmapped:
+        return 0
+
+    mappings_created = 0
+
+    # 2. For each entry, try to match against concept display names
+    for row in unmapped:
+        entry_id = row["entry_id"]
+        text = ((row.get("title") or "") + " " + (row.get("description") or "")).lower()
+
+        for concept_id, display_name in CONCEPT_DISPLAY_NAMES.items():
+            if display_name.lower() in text:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO concept_indicator_map
+                            (concept_id, entry_id, confidence, match_type)
+                        VALUES (%s, %s, %s, 'manual')
+                        ON CONFLICT (concept_id, entry_id) DO NOTHING
+                        """,
+                        (concept_id, entry_id, 0.70),
+                    )
+                    if cur.rowcount > 0:
+                        mappings_created += 1
+
+    return mappings_created

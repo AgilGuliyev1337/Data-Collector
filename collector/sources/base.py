@@ -42,12 +42,12 @@ class DataSource(ABC):
         """Mənbədən data çəkir. Qaytarılan şəkil adapterdən asılıdır."""
         raise NotImplementedError
 
-    def discover_catalogue(self):
-        """Gələcək DataCatalogue/SourceDiscovery qatı üçün yer saxlanılır.
+    def discover_catalogue(self) -> list[dict]:
+        """Gənc DataCatalogue/SourceDiscovery qatı üçün yer saxlanılır.
 
-        Bu mərhələdə heç bir adapter bunu icra etmir.
+        Override et: adapter catalogue discovery icra etməyibsə, boş siyahı qaytar.
         """
-        raise NotImplementedError("discover_catalogue() bu mərhələdə icra olunmur")
+        return []
 
     def metadata(self) -> dict:
         """Mənbə haqqında statik metadata (id, növ və s.)."""

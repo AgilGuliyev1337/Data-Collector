@@ -11,7 +11,19 @@ Yeni Cədvəl / Migration: YOX. Mövcud `sources` sxemindən istifadə edir.
 Commit məsuliyyəti: Çağıranda aiddir — bu funksiyalar `conn.commit()` ÇAĞIRMIIR.
 """
 
+import importlib
 import psycopg2.extras
+
+# Source types that support catalogue discovery natively.
+DISCOVERY_CAPABLE_TYPES = frozenset({"ckan", "worldbank", "eurostat", "imf"})
+
+# Known adapter modules (type -> module path).
+_ADAPTER_MODULES = {
+    "ckan": "collector.sources.ckan_source",
+    # future: "worldbank": "collector.sources.worldbank_source",
+    # future: "eurostat": "collector.sources.eurostat_source",
+    # future: "imf": "collector.sources.imf_source",
+}
 
 
 def list_by_tier(conn, enabled_only=True):
@@ -175,9 +187,50 @@ def get_candidate_indicators(conn, concept_id):
     return [dict(row) for row in rows]
 
 
-# ---------------------------------------------------------------
-# Phase 3: Azerbaijan Static Sources Seed
-# ---------------------------------------------------------------
+def list_discovery_capable_sources(conn) -> list[dict]:
+    """
+    Return enabled sources supporting catalogue discovery.
+
+    Criteria:
+    - type IN ('ckan', 'worldbank', 'eurostat', 'imf')
+    - OR metadata.has_api == True (but only if adapter module exists)
+
+    Skips sources with has_api=False (stat_gov_az, cbar_az).
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, type, base_url, metadata, enabled, trust_level
+            FROM sources
+            WHERE enabled = true
+              AND (
+                  type = ANY(%s)
+                  OR (
+                      metadata ? 'has_api'
+                      AND (metadata->>'has_api')::boolean = true
+                  )
+              )
+            """,
+            (list(DISCOVERY_CAPABLE_TYPES),),
+        )
+        rows = cur.fetchall()
+
+    capable: list[dict] = []
+    for row in rows:
+        r = dict(row)
+        source_type = r["type"]
+        meta = r.get("metadata") or {}
+
+        # If type is in the capable set, always include
+        if source_type in DISCOVERY_CAPABLE_TYPES:
+            capable.append(r)
+        # If type is not in capable set, only include if has_api=True
+        # AND we have an adapter module for it
+        elif meta.get("has_api") and source_type in _ADAPTER_MODULES:
+            capable.append(r)
+        # Otherwise skip (e.g., stat_gov_az, cbar_az with has_api=False)
+
+    return capable
 
 # StatKom (Dövlət Statistika Komitəsi) — real source, amma public API yoxdur.
 # Məlumat yalnız Excel/CSV download və ya data request ilə əldə edilir.

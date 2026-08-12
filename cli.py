@@ -17,6 +17,7 @@ import os
 import yaml
 
 from collector.sources.ckan_source import CKANSource
+from collector.discovery import discover_catalogue_for_source
 from collector.sources.worldbank_source import WorldBankSource, COMMON_INDICATORS
 from collector.sources.eurostat_source import EurostatSource
 from collector.sources.imf_source import IMFSource
@@ -325,6 +326,37 @@ def cbr_snapshot(out_csv: str = None):
         print(f"\nCSV-yə yazıldı: {out_csv}")
 
 
+def discover_catalogue_cmd(cfg, source_id: str = None):
+    """
+    Discover and index catalogue entries from enabled sources.
+
+    Args:
+        cfg: config dict.
+        source_id: Optional specific source to discover. None = all capable.
+    """
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+
+    result = discover_catalogue_for_source(conn, source_id=source_id)
+    conn.commit()
+    conn.close()
+
+    print(f"\n=== Data Catalogue Discovery ===")
+    print(f"  Entries discovered:  {result['entries_discovered']}")
+    print(f"  Entries upserted:    {result['entries_upserted']}")
+    print(f"  Concept mappings:    {result['mappings_created']}")
+
+    if result["errors"]:
+        print(f"\n  Xətalar ({len(result['errors'])}):")
+        for err in result["errors"]:
+            print(f"    - {err}")
+    else:
+        print(f"\n  Heç bir xəta yoxdur.")
+
+    print(f"  Run ID: {result.get('run_id')}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Universal Open-Data Collector")
     parser.add_argument("--config", default="config.yaml")
@@ -349,6 +381,9 @@ def main():
 
     parser.add_argument("--cbr-snapshot", action="store_true",
                          help="Bank of Russia-nın günün valyuta məzənnələrini göstər (MDB sektoral mənbə)")
+
+    parser.add_argument("--discover-catalogue", action="store_true",
+                         help="Discover and index catalogue entries from enabled sources")
 
     args = parser.parse_args()
 
@@ -384,6 +419,8 @@ def main():
         compare(cfg, args.indicator, args.regions, args.start_year, args.end_year, args.out_csv)
     elif args.run:
         run(cfg, only_id=args.source)
+    elif args.discover_catalogue:
+        discover_catalogue_cmd(cfg, source_id=args.source)
     else:
         parser.print_help()
         sys.exit(0)

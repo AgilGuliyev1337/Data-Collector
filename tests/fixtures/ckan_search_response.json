@@ -1,0 +1,84 @@
+{
+    "success": true,
+    "result": {
+        "count": 3,
+        "offset": 0,
+        "rows": 3,
+        "total": 3,
+        "results": [
+            {
+                "id": "gdp-dataset-1",
+                "name": "gdp-azerbaijan-annual",
+                "title": "Gross Domestic Product - Azerbaijan",
+                "notes": "Annual GDP data for Azerbaijan in local currency. Covers 2010-2024.",
+                "license_id": "cc-by",
+                "license_title": "CC BY 4.0",
+                "metadata_modified": "2024-06-15T10:00:00",
+                "temporal_start": 2010,
+                "temporal_end": 2024,
+                "groups": [],
+                "tags": [
+                    {"name": "gdp"},
+                    {"name": "economy"},
+                    {"name": "azerbaijan"}
+                ],
+                "resources": [
+                    {"name": "GDP Data CSV", "url": "https://admin.opendata.az/data/gdp.csv", "format": "CSV"},
+                    {"name": "GDP Methodology", "url": "https://admin.opendata.az/docs/gdp-methodology.pdf", "format": "PDF"}
+                ],
+                "organization": {
+                    "id": "org-stat",
+                    "title": "State Statistics Committee",
+                    "name": "stat-gov-az"
+                }
+            },
+            {
+                "id": "population-dataset-1",
+                "name": "total-population-azerbaijan",
+                "title": "Total Population of Azerbaijan by Year",
+                "notes": "Total population figures from census and annual estimates.",
+                "license_id": "cc-by-sa",
+                "license_title": "CC BY-SA 4.0",
+                "metadata_modified": "2024-05-01T08:00:00",
+                "temporal_start": 2000,
+                "temporal_end": 2024,
+                "groups": [],
+                "tags": [
+                    {"name": "population"},
+                    {"name": "demographics"},
+                    {"name": "azerbaijan"}
+                ],
+                "resources": [
+                    {"name": "Population Data", "url": "https://admin.opendata.az/data/population.csv", "format": "CSV"}
+                ],
+                "organization": {
+                    "id": "org-stat",
+                    "title": "State Statistics Committee",
+                    "name": "stat-gov-az"
+                }
+            },
+            {
+                "id": "weather-data-1",
+                "name": "weather-stations-azerbaijan",
+                "title": "Weather Station Data - Azerbaijan",
+                "notes": "Meteorological data from weather stations across Azerbaijan.",
+                "license_id": "cc-zero",
+                "license_title": "CC0 1.0",
+                "metadata_modified": "2024-03-20T12:00:00",
+                "temporal_start": 2015,
+                "temporal_end": 2024,
+                "groups": [],
+                "tags": [
+                    {"name": "weather"},
+                    {"name": "meteorology"}
+                ],
+                "resources": [],
+                "organization": {
+                    "id": "org-met",
+                    "title": "State Service for Environment",
+                    "name": "met-az"
+                }
+            }
+        ]
+    }
+}
