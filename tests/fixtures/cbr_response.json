@@ -1,0 +1,7 @@
+{
+  "Date": "2024-01-15T11:30:00+03:00",
+  "Valute": {
+    "USD": {"Name": "US Dollar", "Nominal": 1, "Value": 90.0},
+    "EUR": {"Name": "Euro", "Nominal": 1, "Value": 98.0}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "result": {
+    "id": "abc123",
+    "name": "dataset-one",
+    "title": "Dataset One",
+    "organization": {"title": "Test Org"},
+    "license_title": "Creative Commons CCZero",
+    "license_id": "cc-zero",
+    "metadata_modified": "2024-01-01T00:00:00",
+    "tags": [{"name": "trade"}],
+    "groups": [{"name": "economy"}],
+    "resources": [
+      {"name": "res1", "format": "CSV", "url": "https://example.test/res1.csv", "size": 1234}
+    ]
+  }
+}

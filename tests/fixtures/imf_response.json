@@ -1,0 +1,13 @@
+{
+  "CompactData": {
+    "DataSet": {
+      "Series": {
+        "@REF_AREA": "AZ",
+        "Obs": [
+          {"@TIME_PERIOD": "2020", "@OBS_VALUE": "100"},
+          {"@TIME_PERIOD": "2021", "@OBS_VALUE": "110"}
+        ]
+      }
+    }
+  }
+}

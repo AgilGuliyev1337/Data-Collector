@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "result": {
+    "id": "def456",
+    "name": "dataset-two",
+    "title": "Dataset Two (closed license)",
+    "organization": {"title": "Test Org"},
+    "license_title": "All rights reserved",
+    "license_id": "notopen",
+    "metadata_modified": "2024-01-02T00:00:00",
+    "tags": [{"name": "population"}],
+    "groups": [{"name": "society"}],
+    "resources": []
+  }
+}

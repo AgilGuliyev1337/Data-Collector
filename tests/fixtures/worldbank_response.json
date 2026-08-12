@@ -1,0 +1,19 @@
+[
+  {"page": 1, "pages": 1, "per_page": 2000, "total": 2},
+  [
+    {
+      "country": {"id": "AZ", "value": "Azerbaijan"},
+      "countryiso3code": "AZE",
+      "indicator": {"id": "NY.GDP.PCAP.CD", "value": "GDP per capita (current US$)"},
+      "date": "2021",
+      "value": 5408.04535175023
+    },
+    {
+      "country": {"id": "AZ", "value": "Azerbaijan"},
+      "countryiso3code": "AZE",
+      "indicator": {"id": "NY.GDP.PCAP.CD", "value": "GDP per capita (current US$)"},
+      "date": "2020",
+      "value": 4229.91064904503
+    }
+  ]
+]
