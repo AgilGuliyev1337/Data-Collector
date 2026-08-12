@@ -40,20 +40,33 @@ def run_query(
     # Step 1: Parse natural language
     from collector.nl_parser import parse_and_check
     parsed = parse_and_check(query_text, current_year)
+    parsed_concepts = parsed.get("concepts", [])
 
-    # Step 2: Resolve semantic concepts
+    # Step 2: Resolve semantic concepts (seed DB, don't overwrite parsed concepts)
     from collector.semantic_resolver import seed_concepts, seed_concept_mappings_from_synonyms
     try:
-        concepts = seed_concepts(conn)
-        seed_concept_mappings_from_synonyms(conn, concepts)
+        seed_concepts(conn)
+        # Auto-seed concept_indicator_map if empty (lazy init)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM concept_indicator_map")
+            need_seed = cur.fetchone()[0] == 0
+        if need_seed:
+            from collector.db.repository import ensure_catalogue_and_mapping
+            ensure_catalogue_and_mapping(conn)
+            with conn.cursor() as cur2:
+                cur2.execute("SELECT COUNT(*) FROM concept_indicator_map")
+                logger.info("Auto-seeded concept_indicator_map (%d mappings)", cur2.fetchone()[0])
     except Exception as e:
         logger.warning("Semantic seeding failed: %s", e)
-        concepts = []
 
     # Step 3: Build collection plan
     countries = parsed.get("countries", ["global"])
-    concept = parsed.get("concepts", [{}])[0] if parsed.get("concepts") else {}
-    concept_id = concept.get("concept_id", "")
+    # No country detected → default to Azerbaijan (AZ is the primary target)
+    if countries == ["global"]:
+        countries = ["AZE"]
+    # concepts: parse_and_check string qaytarır ['gdp_per_capita'] və ya []
+    raw_concept = parsed.get("concepts", [None])[0] if parsed.get("concepts") else None
+    concept_id = raw_concept if isinstance(raw_concept, str) else (raw_concept.get("concept_id", "") if raw_concept else "")
     period_start = parsed.get("period_start")
     period_end = parsed.get("period_end")
 
@@ -144,7 +157,7 @@ def run_query(
     return {
         "query": query_text,
         "parsed": {
-            "concepts": concepts,
+            "concepts": parsed_concepts,
             "countries": countries,
             "period_start": period_start,
             "period_end": period_end,
@@ -181,8 +194,11 @@ class Orchestrator:
         from collector.collection_plan import build_plan_from_parsed
 
         countries = parsed_result.get("countries", ["global"])
-        concept = parsed_result.get("concepts", [{}])[0] if parsed_result.get("concepts") else {}
-        concept_id = concept.get("concept_id", "")
+        if countries == ["global"]:
+            countries = ["AZE"]
+        # concepts: parse_and_check string qaytarır ['gdp_per_capita'] və ya []
+        raw_concept = parsed_result.get("concepts", [None])[0] if parsed_result.get("concepts") else None
+        concept_id = raw_concept if isinstance(raw_concept, str) else (raw_concept.get("concept_id", "") if raw_concept else "")
         period_start = parsed_result.get("period_start")
         period_end = parsed_result.get("period_end")
 

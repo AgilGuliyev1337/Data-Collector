@@ -554,3 +554,17 @@ def seed_auto_concept_mappings(conn) -> int:
                         mappings_created += 1
 
     return mappings_created
+
+
+# ---------------------------------------------------------------------------
+# Helper: list_sources — sidebar-da göstərmək üçün
+# ---------------------------------------------------------------------------
+
+def list_sources(conn) -> list[dict]:
+    """SELECT id, type, base_url, priority_tier, trust_level, enabled FROM sources ORDER BY priority_tier, id."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT id, type, base_url, priority_tier, trust_level, enabled "
+            "FROM sources ORDER BY priority_tier, id"
+        )
+        return [dict(r) for r in cur.fetchall()]

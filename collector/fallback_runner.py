@@ -1,5 +1,5 @@
 """
-Deterministic Fallback Runner — Phase 2C.
+Deterministic Fallback Runner --- Phase 2C.
 
 Concept üçün candidate indicator-ləri prioritet sırala ilə yoxlayır.
 İlk uğurlu cavabda dayanır.
@@ -82,27 +82,16 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
         countries: ISO3 ölkə kodları siyahısı.
         period_start: başlanğıc il.
         period_end: bitiş il.
-
-    Returns:
-        {
-            "success": bool,
-            "records": list,        # uğurlu fetch-dən gələn data
-            "attempts": [           # hər cəhdin auditi
-                {
-                    "source_id": str,
-                    "indicator_code": str,
-                    "confidence": float,
-                    "priority_tier": int,
-                    "status": "success" | "empty" | "error",
-                    "error_message": str | None,
-                    "records_count": int,
-                },
-                ...
-            ],
-            "selected_source": str | None,   # uğurlu olan source (yoxdursa None)
-            "selected_indicator": str | None,
-        }
+        Period None olduqda default: son 10 il.
     """
+    # Default period: heç biri verilməyibsə son 10 il
+    if period_start is None or period_end is None:
+        period_start = period_start or 2015
+        period_end = period_end or 2025
+
+    # Returns dict:
+    #   success: bool, records: list, attempts: list,
+    #   selected_source: str | None, selected_indicator: str | None, run_id: int
     candidates = get_candidate_indicators(conn, concept_id)
 
     if not candidates:
@@ -150,14 +139,14 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
             attempt["status"] = "skipped"
             attempt["error_message"] = f"Source '{source_id}' sources cədvəlində tapılmadı"
             attempts.append(attempt)
-            logger.warning("Source '%s' tapılmadı — keçilir.", source_id)
+            logger.warning("Source '%s' tapılmadı --- keçilir.", source_id)
             continue
 
         if not source_info.get("enabled", True):
             attempt["status"] = "skipped"
             attempt["error_message"] = f"Source '{source_id}' disabled"
             attempts.append(attempt)
-            logger.warning("Source '%s' disabled — keçilir.", source_id)
+            logger.warning("Source '%s' disabled --- keçilir.", source_id)
             continue
 
         # Adapter tap
@@ -166,7 +155,7 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
             attempt["status"] = "skipped"
             attempt["error_message"] = f"Adapter '{source_id}' üçün mapper tapılmadı"
             attempts.append(attempt)
-            logger.warning("Source '%s' üçün adapter mapper yoxdur — keçilir.", source_id)
+            logger.warning("Source '%s' üçün adapter mapper yoxdur --- keçilir.", source_id)
             continue
 
         adapter_class, kwargs_fn = dispatch
@@ -243,14 +232,14 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
                 concept_id, source_id, e,
             )
 
-    # Bütün candidate-lər bitdi — uğursuz
+    # Bütün candidate-lər bitdi --- uğursuz
     repository.finish_collection_run(
         conn, run_id, "failed", 0,
         error_message=f"Hamısı uğursuz: {last_error}",
     )
 
     logger.warning(
-        "Concept '%s' — bütün candidate-lər uğursuz.", concept_id,
+        "Concept '%s' --- bütün candidate-lər uğursuz.", concept_id,
     )
     return {
         "success": False,
@@ -266,7 +255,7 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
 def _normalize_result(raw_rows, source_id, run_id, concept_id, indicator_code):
     """Adapter-dən gələn raw data-ya facts formatında sətirlər yarat.
 
-    collection.extract_data() istifadə edir — hər adapter üçün
+    collection.extract_data() istifadə edir --- hər adapter üçün
     unified DataPoint yaradır, sonra insert_facts() formatına çevirir.
 
     Args:

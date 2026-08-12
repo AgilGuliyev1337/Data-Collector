@@ -78,9 +78,14 @@ SYNONYM_DICT: dict[str, dict] = {
             "gdp per person",
             "gdp per head",
             "gross domestic product per capita",
+            "gdp income",
+            "wage",
+            "salaries",
+            "salary",
+            "income per capita",
         },
         # "nəfər"→"nefer", "başına"→"basina", "üdm"→"udm"
-        "keywords": {"gdp", "gdm", "udm", "per capita", "nefer", "nfe", "capita", "basina", "başına"},
+        "keywords": {"gdp", "gdm", "udm", "per capita", "nefer", "nfe", "capita", "basina", "başına", "wage", "salari", "income", "gəlir"},
     },
     "unemployment": {
         "display_name": "Unemployment Rate",
@@ -112,15 +117,17 @@ SYNONYM_DICT: dict[str, dict] = {
     },
     "population": {
         "display_name": "Total Population",
-        "az": {"nəfər", "ehali", "populyasiya", "population", "total population"},
+        "az": {"nəfər", "ehali", "ehalin", "ehalinin", "ehalini", "populyasiya", "population", "total population"},
         "en": {
             "population",
             "total population",
             "people",
             "inhabitants",
             "pop",
+            "population count",
+            "number of people",
         },
-        "keywords": {"nefer", "nfe", "ehali", "populat", "population", "people", "inhabitant", "pop"},
+        "keywords": {"nefer", "nfe", "ehali", "ehalin", "ehalinin", "ehal", "ehalini", "populat", "population", "people", "inhabitant", "pop", "say", "sayi", "sayın"},
     },
     "internet_users": {
         "display_name": "Internet Users",
