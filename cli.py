@@ -3,6 +3,7 @@
 Universal Open-Data Collector CLI
 
 İstifadə:
+    python cli.py --migrate            # DB migration-larını tətbiq et (ilk dəfə tələb olunur)
     python cli.py --run                # config.yaml-dakı bütün enabled source-ları işlət
     python cli.py --run --source opendata_az   # yalnız bir source
     python cli.py --list-sources        # config-dəki source-ları göstər
@@ -13,15 +14,16 @@ import argparse
 import logging
 import sys
 import os
-import csv
 import yaml
 
-from collector.ckan_source import CKANSource
-from collector.worldbank_source import WorldBankSource, COMMON_INDICATORS
-from collector.eurostat_source import EurostatSource
-from collector.imf_source import IMFSource
-from collector.cbr_source import CBRSource
-from collector.storage import get_storage, save_comparison_csv
+from collector.sources.ckan_source import CKANSource
+from collector.sources.worldbank_source import WorldBankSource, COMMON_INDICATORS
+from collector.sources.eurostat_source import EurostatSource
+from collector.sources.imf_source import IMFSource
+from collector.sources.cbr_source import CBRSource
+from collector.db.connection import get_connection
+from collector.db import repository
+from collector import csv_export
 
 SOURCE_TYPES = {
     "ckan": CKANSource,
@@ -38,7 +40,6 @@ def setup_logging(cfg: dict):
     level = getattr(logging, log_cfg.get("level", "INFO"))
     handlers = [logging.StreamHandler()]
     if log_cfg.get("file"):
-        import os
         os.makedirs("data", exist_ok=True)
         handlers.append(logging.FileHandler(log_cfg["file"], encoding="utf-8"))
     logging.basicConfig(
@@ -46,6 +47,15 @@ def setup_logging(cfg: dict):
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+
+
+def _connect():
+    try:
+        return get_connection()
+    except Exception as e:
+        print(f"DB bağlantı xətası: {e}")
+        print("Migration-ların tətbiq olunduğunu yoxla: python cli.py --migrate")
+        sys.exit(1)
 
 
 def build_sources(cfg: dict, only_id: str = None):
@@ -64,27 +74,47 @@ def build_sources(cfg: dict, only_id: str = None):
 
 
 def run(cfg: dict, only_id: str = None):
-    storage = get_storage(cfg.get("storage", {}))
     sources = build_sources(cfg, only_id)
 
     if not sources:
         print("İşlədiləcək source tapılmadı (config.yaml-ı yoxla).")
         return
 
-    total_saved = 0
-    for src in sources:
-        print(f"\n=== Source: {src.id} ===")
-        n = 0
-        for record in src.collect():
-            storage.save(record)
-            n += 1
-            if n % 20 == 0:
-                print(f"  ... {n} dataset toplandı")
-        print(f"[{src.id}] cəmi {n} dataset saxlanıldı (filtrdən keçən)")
-        total_saved += n
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+    run_id = repository.start_collection_run(conn, "run", {"source": only_id})
+    conn.commit()
 
-    storage.close()
-    print(f"\nBİTDİ. Cəmi {total_saved} dataset bazaya/fayla yazıldı.")
+    total_saved = 0
+    try:
+        for src in sources:
+            print(f"\n=== Source: {src.id} ===")
+            repository.upsert_source(
+                conn, src.id, "ckan", base_url=src.base_url,
+                priority_tier=src.priority_tier, trust_level=src.trust_level,
+            )
+            conn.commit()
+            n = 0
+            for record in src.collect():
+                repository.upsert_dataset(conn, record)
+                conn.commit()
+                n += 1
+                if n % 20 == 0:
+                    print(f"  ... {n} dataset toplandı")
+            print(f"[{src.id}] cəmi {n} dataset saxlanıldı (filtrdən keçən)")
+            total_saved += n
+        repository.finish_collection_run(conn, run_id, "success", total_saved)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        repository.finish_collection_run(conn, run_id, "failed", total_saved, error_message=str(e))
+        conn.commit()
+        raise
+    finally:
+        conn.close()
+
+    print(f"\nBİTDİ. Cəmi {total_saved} dataset bazaya yazıldı.")
 
 
 def list_sources(cfg: dict):
@@ -148,8 +178,30 @@ def compare(cfg: dict, indicator: str, regions: list, start_year: int, end_year:
     for iso3, r in sorted(latest.items(), key=lambda x: (x[1]["region"], x[1]["country"])):
         print(f"  [{r['region']:<12}] {r['country']:<20} ({r['year']}): {r['value']}")
 
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+    run_id = repository.start_collection_run(
+        conn, "compare",
+        {"indicator": indicator, "regions": regions, "start_year": start_year, "end_year": end_year},
+    )
+    conn.commit()
+    indicator_code = wb.resolve_indicator(indicator)
+    fact_rows = [
+        {
+            "source_id": "world_bank", "run_id": run_id, "concept": indicator,
+            "indicator_code": indicator_code, "country": r["country"], "iso3": r["iso3"],
+            "period": r["year"], "value": r["value"], "unit": None,
+        }
+        for r in all_rows if r["value"] is not None
+    ]
+    repository.insert_facts(conn, fact_rows)
+    repository.finish_collection_run(conn, run_id, "success", len(fact_rows))
+    conn.commit()
+    conn.close()
+
     if out_csv:
-        save_comparison_csv(all_rows, out_csv)
+        csv_export.save_comparison_csv(all_rows, out_csv)
         print(f"\nBütün illər üzrə tam data CSV-yə yazıldı: {out_csv}")
 
 
@@ -214,14 +266,29 @@ def cross_check(cfg: dict, concept: str, regions: list, start_year: int, end_yea
             continue
         print(f"{r.get('source', ''):<12} {r.get('iso3') or r.get('country'):<8} {r.get('year'):<6} {r.get('value')}")
 
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+    run_id = repository.start_collection_run(
+        conn, "cross_check",
+        {"concept": concept, "regions": regions, "start_year": start_year, "end_year": end_year},
+    )
+    conn.commit()
+    fact_rows = [
+        {
+            "source_id": r.get("source"), "run_id": run_id, "concept": concept,
+            "indicator_code": r.get("indicator"), "country": r.get("country"), "iso3": r.get("iso3"),
+            "period": r.get("year"), "value": r.get("value"), "unit": None,
+        }
+        for r in all_rows if r.get("value") is not None
+    ]
+    repository.insert_facts(conn, fact_rows)
+    repository.finish_collection_run(conn, run_id, "success", len(fact_rows))
+    conn.commit()
+    conn.close()
+
     if out_csv:
-        os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
-        with open(out_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["source", "country", "iso3", "indicator", "year", "value"])
-            for r in all_rows:
-                writer.writerow([r.get("source"), r.get("country"), r.get("iso3"),
-                                  r.get("indicator"), r.get("year"), r.get("value")])
+        csv_export.save_cross_check_csv(all_rows, out_csv)
         print(f"\nTam data CSV-yə yazıldı: {out_csv}")
 
 
@@ -234,19 +301,34 @@ def cbr_snapshot(out_csv: str = None):
     print(f"=== Bank of Russia - günün valyuta məzənnələri ({rows[0]['date']}) ===")
     for r in sorted(rows, key=lambda x: x["currency"]):
         print(f"  {r['currency']}: {r['value_rub']} RUB (nominal={r['nominal']}) - {r['name']}")
+
+    conn = _connect()
+    repository.ensure_static_sources(conn)
+    conn.commit()
+    run_id = repository.start_collection_run(conn, "cbr_snapshot", {})
+    conn.commit()
+    fx_rows = [
+        {
+            "source_id": "cbr_russia", "run_id": run_id, "currency_code": r["currency"],
+            "currency_name": r["name"], "nominal": r["nominal"], "value_rub": r["value_rub"],
+            "rate_date": r["date"][:10] if r.get("date") else None,
+        }
+        for r in rows
+    ]
+    repository.upsert_fx_rates(conn, fx_rows)
+    repository.finish_collection_run(conn, run_id, "success", len(fx_rows))
+    conn.commit()
+    conn.close()
+
     if out_csv:
-        os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
-        with open(out_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["currency", "name", "nominal", "value_rub", "date"])
-            for r in rows:
-                writer.writerow([r["currency"], r["name"], r["nominal"], r["value_rub"], r["date"]])
+        csv_export.save_cbr_csv(rows, out_csv)
         print(f"\nCSV-yə yazıldı: {out_csv}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Universal Open-Data Collector")
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--migrate", action="store_true", help="DB migration-larını tətbiq et")
     parser.add_argument("--run", action="store_true", help="Data toplamağı işə sal")
     parser.add_argument("--source", help="Yalnız bu source id-ni işlət")
     parser.add_argument("--list-sources", action="store_true")
@@ -269,6 +351,15 @@ def main():
                          help="Bank of Russia-nın günün valyuta məzənnələrini göstər (MDB sektoral mənbə)")
 
     args = parser.parse_args()
+
+    if args.migrate:
+        from collector.db.migrate import run_migrations
+        applied = run_migrations()
+        if applied:
+            print(f"Tətbiq olundu: {', '.join(applied)}")
+        else:
+            print("Bütün migration-lar artıq tətbiq olunub (dəyişiklik yoxdur).")
+        return
 
     cfg = load_config(args.config)
     setup_logging(cfg)

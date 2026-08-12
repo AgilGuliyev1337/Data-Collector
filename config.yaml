@@ -17,6 +17,8 @@ sources:
     # yalnız açıq lisenziyalı (cc-zero, cc-by və s.) datasetləri saxla
     require_open_license: true
     rate_limit_per_sec: 2
+    priority_tier: 2       # AZ Open Data
+    trust_level: official
     enabled: true
 
   # ABŞ-ın rəsmi açıq-data portalı (CKAN)
@@ -28,6 +30,8 @@ sources:
       tags: []
     require_open_license: false   # data.gov-da license_id sahəsi çox vaxt boşdur, əl ilə yoxla
     rate_limit_per_sec: 2
+    priority_tier: 5       # digər public API/open data (AZ deyil)
+    trust_level: official
     enabled: false   # default deaktiv - kataloq çox böyükdür (300k+ dataset), əvvəlcə filter təyin et
 
   # Avropa Komissiyasının aqreqasiya edilmiş portalı
@@ -98,11 +102,6 @@ concepts:
   inflation:
     world_bank: FP.CPI.TOTL.ZG
     eurostat: prc_hicp_manr      # HICP illik dəyişmə - yoxla!
-
-storage:
-  backend: sqlite          # sqlite | csv
-  sqlite_path: data/collector.db
-  csv_dir: data/csv
 
 logging:
   level: INFO
