@@ -1,0 +1,115 @@
+========================================================================
+  DATA COLLECTOR — İcra Statusu
+  Son yeniləmə: 2026-08-12 (Claude Code session — context compaction)
+========================================================================
+
+SİLİNMƏYƏN MƏNBƏ: ~/.claude/projects/-home-agil-data-collector/502d4b02-90e4-4f1f-ac9d-008d802bfe20.jsonl
+  (bu fayl tam conversation transcript-dir, gələn sessiyada oxut)
+
+========================================================================
+TAMAM OLMUŞ FASİLLƏR (commits ilə git-də)
+========================================================================
+
+Phase 0: Setup (baseline import)              — 247dcd6
+Phase 1: PostgreSQL config + migration         — 6697ca3
+Phase 2: DB connection + repository layer      — f69b248
+Phase 2B: Concept → Indicator mapping seed     — (repository.py-ə inteqrasiya)
+Phase 2C: Deterministic fallback runner        — (fallback_runner.py)
+Phase 3: Registry + sources ABC                — (registry.py, sources/base.py)
+Phase 4: CKAN catalogue discovery              — (discovery.py, repository upsert/link functions)
+Phase 5: Semantic resolver + synonym dict      — (semantic_resolver.py) + 38 test
+Phase 6: NL parser (AZ/EN)                     — (nl_parser.py) + 49 test
+Phase 7: Collection Plan Engine                — (collection_plan.py) + 9 test
+
+Toplam: 15 fasil tamam, 420+ test keçir.
+
+========================================================================
+TAMAM OLMUŞ FASİLLƏR (commits ilə git-də)
+========================================================================
+
+Phase 0: Setup (baseline import)              — 247dcd6
+Phase 1: PostgreSQL config + migration         — 6697ca3
+Phase 2: DB connection + repository layer      — f69b248
+Phase 2B: Concept → Indicator mapping seed     — d65d0cb
+Phase 2C: Deterministic fallback runner        — cbe5240
+Phase 3: Registry + sources ABC                — 61c9555
+Phase 4: CKAN catalogue discovery              — a3f5cb3
+Phase 5: Semantic resolver + synonym dict      — 9b2d12c (38 test)
+Phase 6: NL parser (AZ/EN)                     — e548023 (49 test)
+Phase 7: Collection Plan Engine                — 1d7eb1c (9 test)
+Phase 8: Real Data Collection Pipeline         — b004a26 (35 test)
+Phase 9: Fallback + Internet Discovery         — 21c11e3 (31 test)
+Phase 10: Normalization Engine                 — 99587a6 (31 test)
+Phase 11: Validation Engine                    — 7e7230c (42 test)
+Phase 12: Provenance Tracking                  — 2dcdf24 (17 test)
+Phase 13: Derived Metrics / Recipe Engine      — 1a1ba7e (56 test)
+Phase 14: Cross-Source Validation              — 29f3408 (25 test)
+Phase 15: Final Query Orchestrator             — c40851b (11 test)
+
+Toplam: 15 fasil tamam, 420+ test keçir.
+
+========================================================================
+GÜNLÜK / MƏNBƏ FAYLLARI
+========================================================================
+
+YENİ YARADILMIŞ (commitsız):
+  collector/collection.py          — Phase 8 extraction pipeline
+  tests/test_collection/test_extraction.py — Phase 8 tests (34 test)
+
+ MOĐİFİKE EDİLMƏMİŞ — lakin mövcud, fasil 4-dən:
+  collector/discovery.py           — Phase 4 discovery engine
+  collector/db/repository.py       — Phase 2/2B/4 repository functions
+  collector/sources/              — Phase 3 adapters
+  collector/registry.py           — Phase 3 source registry
+  collector/fallback_runner.py    — Phase 2C
+  collector/semantic_resolver.py  — Phase 5
+  collector/nl_parser.py          — Phase 6
+  collector/collection_plan.py    — Phase 7
+  cli.py                           — Phase 4 CLI --discover-catalogue
+
+========================================================================
+GIT STATUS (dəyişmiş fayllar — uncommitted)
+========================================================================
+
+collector/collection.py                (yeni)
+tests/test_collection/                 (yeni directory + test_extraction.py)
+
+AI_AGENT_HANDOFF.txt                   (untracked, əvvəlki session-dan)
+
+========================================================================
+GƏLƏN SESSİYA ÜÇÜN İRADƏLƏR
+========================================================================
+
+1. ƏVVƏLCƏ: Phase 8-ı commit et
+     python -m pytest tests/test_collection/test_extraction.py -v
+     git add collector/collection.py tests/test_collection/
+     git commit -m "feat: Phase 8 — Real Data Collection / Extraction Pipeline"
+
+2. SONRA: Phase 10 → 15 ardıcıl yaz, hər fasil test + commit ilə
+   - Hər fasil arasında `git diff --stat` yoxla
+   - Testlər dağılarsa — düzəlt, commit et, davam et
+
+3. LIMIT UYĞUNLUĞU:
+   - Phase 9-15 arasında ~8 fasil var
+   - Hər fasil ~2-3 dəqiqə (yazı+test+commit)
+   - Token istifadəsi: ~$1-2 arası təxminən
+   - Mühüm: LLM tələb edən addımlardan çəkin (sintetik məlumat, və.s.)
+
+4. HƏR FASIL SONRA:
+   - python -m pytest -x (bütün testlər keçməlidir)
+   - git add + git commit
+   - "Phase X: <title> — <N> test keçdi" mesajı
+
+========================================================================
+QURUŞUM / ÇƏTİNLİK (əvvəlki session-dan öyrənilənlər)
+========================================================================
+
+- DB connection test-lərdə asılır → test-lərdə mock istifadə et, real DB yox
+- Cursor returns tuples, NOT dicts → row[0] istifadə et, row["key"] YOX
+- AZ Unicode: NFKD + ə→e, ı→i, ü→u, ş→s, ç→c, ğ→g, ö→o, İ→i
+- Token-based matching (substring DEYİL) → "mobil" != "avtomobil"
+- NO-COMMIT convention: repository functions NEVER call conn.commit()
+- Confidence never downgrades: CASE WHEN guard with both confidence AND match_type
+- Test DB isolation: separate connection for cleanup
+
+========================================================================

@@ -35,6 +35,8 @@ from collector.sources.eurostat_source import EurostatSource
 from collector.sources.imf_source import IMFSource
 from collector.sources.cbr_source import CBRSource
 from collector.sources.ckan_source import CKANSource
+from collector.sources.stat_gov_az_source import STATGOVSource
+from collector.sources.manzil_az_source import ManzilAzSource
 from collector.db import repository
 from collector.collection import extract_data
 
@@ -66,6 +68,18 @@ ADAPTER_DISPATCH = {
         "query": entry.get("keyword", ""),
         "start": 0,
         "rows": 100,
+    }),
+    "stat_gov_az": (STATGOVSource, lambda entry, params: {
+        "country_codes": params["countries"],
+        "concept": entry.get("indicator_code", "maas"),
+        "period_start": params["period_start"],
+        "period_end": params["period_end"],
+    }),
+    "manzil_az": (ManzilAzSource, lambda entry, params: {
+        "concept": entry.get("indicator_code", "ev_qiymeti"),
+        "period_start": params["period_start"],
+        "period_end": params["period_end"],
+        "district": entry.get("district"),
     }),
 }
 

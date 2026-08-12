@@ -206,6 +206,24 @@ SYNONYM_DICT: dict[str, dict] = {
         "en": {"researchers", "researcher per million", "scientists", "rd personnel"},
         "keywords": {"research", "alim", "tədqiq", "rd person"},
     },
+    "maas": {
+        "display_name": "Average Monthly Salary",
+        "az": {"maaş", "maas", "əmək haqqı", "əmək haqq", "məvacib", "məvacib", "gəlir"},
+        "en": {"salary", "wage", "average salary", "monthly salary", "income", "earnings"},
+        "keywords": {"maas", "maaş", "mavacib", "maaj", "maaj", "wage", "salary", "gelir", "gəlir", "maas"},
+    },
+    "ev_qiymeti": {
+        "display_name": "Housing Price Per Square Meter",
+        "az": {"ev qiyməti", "ev qiymet", "mənzil qiyməti", "mənzil qiymet", "əmlak qiyməti", "əmlak qiymet"},
+        "en": {"housing price", "apartment price", "home price", "property price", "real estate price", "house price per sqm"},
+        "keywords": {"ev", "menzil", "manzil", "emlak", "emlak", "qiymet", "qiymet", "price", "apartment", "real estate"},
+    },
+    "ev_almaq": {
+        "display_name": "Housing Affordability (30% rule)",
+        "az": {"ev almaq", "ev alın", "mənzil almaq", "mənzil alın", "ipoteka", "credit", "30% yığım"},
+        "en": {"buy a house", "buy apartment", "mortgage", "home buying", "30% savings", "housing savings", "affordable housing"},
+        "keywords": {"ev", "menzil", "manzil", "ipoteka", "mortgage", "credit", "save", "yigim", "yigimi", "30", "save", "afford"},
+    },
 }
 
 

@@ -1,0 +1,469 @@
+================================================================================
+AI AGENT HANDOFF — Data Collector Platformu
+Hazırlanma tarixi: 2026-08-12
+Bu sənəd növbəti işi davam etdirəcək AI coding agent üçün yazılıb.
+================================================================================
+
+
+1. LAYİHƏNİN MƏQSƏDİ
+--------------------------------------------------------------------------------
+Uzunmüddətli hədəf (bax: data-platform-arxitektura-tehlili.md) — istifadəçinin
+təbii dildə verdiyi data tələbini ("Azərbaycanda ev qiymətləri əlçatanlığı
+necədir?" kimi) son nəticəyə (dataset/rəqəm + mənbə + etibarlılıq göstəricisi)
+qədər aparan zəncir qurmaqdır:
+
+    tələb (natural language)
+      → konsept(lər)ə çevrilmə
+      → hansı mənbələrdə uyğun indicator var — tapılması
+      → mənbədən data toplanması (collection)
+      → normalizasiya + validasiya
+      → (lazım olduqda) recipe/formula ilə törəmə metrik hesablanması
+      → provenance ilə birgə son dataset
+
+Hazırkı layihə (last-data.zip-dən miras) bu zəncirin YALNIZ "collection"
+hissəsini edir — 5 hardcoded adapter var, konsept→indicator xəritələməsi
+statik və qismən, "tələb→konsept" və "konsept→mənbə discovery" hissələri
+HƏLƏ YOXDUR. Bu handoff-un yazıldığı an layihə arxitektura sənədindəki
+uzunmüddətli vizyonun yalnız TƏMƏL İNFRASTRUKTUR qatındadır (Mərhələ 1: git
+checkpoint + PostgreSQL-ə keçid), AI/semantic-search/discovery qatları hələ
+qəsdən qurulmayıb.
+
+
+2. MÖVCUD ARXİTEKTURA
+--------------------------------------------------------------------------------
+Directory strukturu (real, `find` ilə yoxlanılıb):
+
+    data-collector/
+      cli.py                          # tək entry point, argparse
+      config.yaml                     # CKAN source-ları, regionlar, concept map
+      requirements.txt                # PyYAML, psycopg2-binary, python-dotenv, pytest
+      pytest.ini                      # marker: db
+      .env / .env.example             # DATABASE_URL, TEST_DATABASE_URL, LOG_LEVEL
+      README.md                       # köhnə (SQLite dövrü) istifadə təlimatı — QEYD: bəzi
+                                       #   hissələri (storage.backend, SQLite yolu) ARTIQ KÖHNƏLİB
+      data-platform-arxitektura-tehlili.md   # uzunmüddətli arxitektura sənədi (təhlil/təklif, QƏRAR DEYİL)
+      collector/
+        __init__.py
+        sources/
+          __init__.py
+          base.py                     # DataSource ABC
+          ckan_source.py              # CKANSource
+          worldbank_source.py         # WorldBankSource
+          eurostat_source.py          # EurostatSource
+          imf_source.py               # IMFSource
+          cbr_source.py               # CBRSource
+        db/
+          __init__.py
+          connection.py               # .env-dən DSN oxuyub psycopg2 connection açır
+          migrate.py                  # plain-SQL migration runner
+          repository.py               # bütün raw SQL burada (commit ETMİR)
+        csv_export.py                 # save_comparison_csv/save_cross_check_csv/save_cbr_csv
+      migrations/
+        0001_init.sql                 # tam sxem (aşağıda bölmə 4)
+      tests/
+        conftest.py                   # fake_response/load_fixture, db_conn (rollback) fixture-ları
+        fixtures/*.json                # mock HTTP cavabları
+        test_sources/*.py              # mocked adapter testləri (marker yoxdur → həmişə işləyir)
+        test_db/*.py                   # marker=db, real Postgres tələb edir
+
+Əsas Python komponentləri:
+- `cli.py` — vahid CLI. `--migrate`, `--run`, `--compare`, `--cross-check`,
+  `--cbr-snapshot`, `--list-sources`, `--list-packages`, `--list-indicators`
+  bayraqları. Yazma əməliyyatları `collector.db.repository` çağırır,
+  transaction sərhədini (`conn.commit()`/`conn.rollback()`) ÖZÜ idarə edir.
+- `collector/sources/base.py` — `DataSource` ABC: `validate_connection()`
+  və `fetch(**kwargs)` abstract, `discover_catalogue()` `NotImplementedError`
+  atır (qəsdən — bu mərhələdə heç bir adapter bunu icra etmir),
+  `metadata()`/`rate_limit()` default-lu.
+- `collector/db/connection.py` — `get_dsn(test=False)`, `get_connection(test=False)`,
+  `.env`-i `python-dotenv` ilə oxuyur.
+- `collector/db/migrate.py` — `run_migrations(conn=None)`, `migrations/*.sql`
+  fayllarını əlifba sırası ilə oxuyub tətbiq edir, `schema_migrations`
+  cədvəlində izləyir.
+- `collector/db/repository.py` — `upsert_source`, `ensure_static_sources`,
+  `upsert_dataset`, `start_collection_run`, `finish_collection_run`,
+  `insert_facts`, `upsert_fx_rates`. HEÇ BİR funksiya `conn.commit()`
+  ÇAĞIRMIR — commit məsuliyyəti çağıran kodda (cli.py və ya test fixture-da) qalır.
+
+PostgreSQL arxitekturası:
+- Yeganə application database — SQLite/CSV storage tam silinib.
+- Rol: `collector`, database-lər: `data_collector` (dev) və
+  `data_collector_test` (test, `TEST_DATABASE_URL`).
+- Bağlantı `.env`-dən (`DATABASE_URL` / `TEST_DATABASE_URL`) gəlir,
+  `.env` git-ə commit edilmir (`.env.example` isə edilir).
+
+pgvector vəziyyəti:
+- Extension `migrations/0001_init.sql`-də `CREATE EXTENSION IF NOT EXISTS
+  vector;` ilə aktivləşdirilib — HƏR İKİ database-də (dev+test) artıq
+  quraşdırılıb.
+- VACIB TEXNİKİ QEYD: bu serverdə `postgresql-16-pgvector` paketi
+  extension-i "trusted" kimi işarələmir, ona görə `CREATE EXTENSION`
+  superuser tələb edir. `postgres` superuser bunu hər iki DB-də bir dəfə
+  əl ilə icra edib; bundan sonra `collector` rolunun `CREATE EXTENSION
+  IF NOT EXISTS vector` çağırışı safe no-op-dur (artıq mövcud olduğu üçün
+  icazə yoxlamasına belə çatmır). Əgər YENİ bir database (məs. production)
+  yaradılsa, bu addım TƏKRAR əl ilə ediləcək: superuser ilə bir dəfəlik
+  `CREATE EXTENSION`.
+- Heç bir cədvəldə `vector` tipli sütun YOXDUR — embedding/semantic-search
+  məntiqi qəsdən qurulmayıb, yalnız infrastruktur hazırdır.
+
+Source adapter-lər: bax bölmə 5.
+
+CLI: `cli.py`, `argparse` əsaslı, 8 bayraq (yuxarıda sadalanıb). Oxu-yalnız
+komandalar (`--list-*`) DB yazmır, `--run`/`--compare`/`--cross-check`/
+`--cbr-snapshot` isə Postgres-ə yazır və (opsional `--out-csv` ilə) CSV
+də yaza bilir.
+
+Migration sistemi: ORM/Alembic YOXDUR. `migrations/*.sql` faylları,
+`schema_migrations(version, applied_at)` cədvəli ilə izlənən, sıra ilə
+tətbiq olunan, idempotent runner (`collector/db/migrate.py`). Həm
+proqramdaxili (`run_migrations(conn)`), həm CLI-dən (`--migrate`) çağırılır.
+
+Test sistemi: `pytest`. `pytest.ini`-də `db` marker-i var.
+- `tests/test_sources/*` — HEÇ bir marker yoxdur, `urllib.request.urlopen`
+  mock edilir (`unittest.mock.patch` + `FakeHTTPResponse`), canned JSON
+  fixture-lardan oxunur. Şəbəkə çağırışı YOXDUR, DB tələb etmir.
+- `tests/test_db/*` — `pytestmark = pytest.mark.db`, real
+  `data_collector_test`-ə qoşulur. `db_conn` fixture-u hər testdən sonra
+  `rollback()` edir (mock yoxdur, DB həmişə təmiz qalır).
+- `pytest` (tam) = 31 test, `pytest -m "not db"` = 18, `pytest -m "db"` = 13
+  (bu handoff yazılan an hamısı keçir).
+
+
+3. İNDİYƏ QƏDƏR EDİLƏN İŞLƏR
+--------------------------------------------------------------------------------
+Xronoloji (git commit-lərinə uyğun, bax bölmə 11):
+
+1. Git checkpoint — repo əvvəllər git-də deyildi. `git init`, `.gitignore`,
+   layihənin ORİJİNAL (heç bir kod dəyişikliyi olmadan) halının baseline
+   commit-i (`247dcd6`) — problem yarananda geri qayıtmaq üçün nöqtə.
+2. SQLite-dən TAM imtina — `storage.py` (SQLite+CSV storage layer) silinib,
+   heç bir compatibility layer/dual-write saxlanılmayıb.
+3. PostgreSQL-ə keçid — yeganə application database. Rol/DB yaradılıb,
+   `.env` təsis olunub, pgvector aktivləşdirilib (yuxarıda bölmə 2).
+4. `DataSource` ABC — bütün 5 adapter bu interfeysə uyğunlaşdırılıb, AMMA
+   `fetch()` signature-u məcburi eyniləşdirilməyib (hər adapterin öz domen
+   parametrləri var).
+5. Repository layer — bütün raw SQL `collector/db/repository.py`-də
+   cəmləşdirilib, `cli.py`/adapter-lər birbaşa SQL yazmır.
+6. `collection_runs` — hər CLI yazma-əməliyyatının audit sətri (command,
+   params JSON, status, records_collected, error_message, started_at,
+   finished_at).
+7. `facts` — makro göstərici sətirləri üçün APPEND-ONLY cədvəl (eyni
+   concept/country/period üçün yeni sətir tarixçə kimi əlavə olunur,
+   üzərinə yazılmır).
+8. `fx_rates` — CBR gündəlik FX snapshot-u üçün AYRICA cədvəl,
+   `(currency_code, rate_date)` üzrə UPSERT (bura tək gündəlik "snapshot"
+   yazılır, tarixçə yox).
+9. Testlər — mocked adapter testləri (şəbəkəsiz) + real-DB repository/
+   migration testləri (rollback izolyasiyalı) yazılıb, hamısı keçir.
+10. Digər mühüm dəyişikliklər:
+    - `cli.py`-in əvvəlki sınıq `collector.*` importları düzəldilib (paket
+      strukturu yaradılaraq).
+    - `config.yaml`-dan mənasız `storage: {backend: sqlite|csv}` bölməsi
+      silinib (Postgres yeganə seçim olduğu üçün "backend seçimi" artıq
+      yoxdur).
+    - `config.yaml`-dakı CKAN source-larına `priority_tier`/`trust_level`
+      əlavə olunub.
+    - Repository funksiyalarından `conn.commit()` çağırışları ÇIXARILIB —
+      bu, ilkin versiyada var idi, amma test-level transaction-rollback
+      izolyasiyasını qeyri-mümkün edirdi (artıq commit olunmuş yazını
+      rollback silə bilməz). Commit məsuliyyəti indi tam çağırana keçib.
+
+
+4. DATABASE SCHEMA
+--------------------------------------------------------------------------------
+Mənbə: migrations/0001_init.sql (tək migration fayl, indiyədək).
+
+- `sources (id PK, type, base_url, discovery_method, priority_tier,
+  trust_level, enabled, metadata JSONB, created_at, updated_at)`
+  Məqsəd: bütün data mənbələrinin kataloqu (həm config.yaml-dakı CKAN
+  source-ları, həm kod-daxili world_bank/eurostat/imf/cbr_russia).
+  `discovery_method` CHECK('static','discovered'), `trust_level`
+  CHECK('official','aggregated','community','unverified_web') — gələcək
+  source-discovery qatı üçün SAXLANILAN sütunlar (bax bölmə 7/8).
+
+- `datasets (source_id FK→sources, dataset_id, name, title, org, license,
+  license_id, modified, tags JSONB, groups_ JSONB, resources JSONB,
+  collected_at, PK(source_id, dataset_id))`
+  Məqsəd: CKAN portallarından toplanan dataset METADATA-sı (faktiki
+  data faylı yüklənmir, yalnız kataloq indeksi).
+
+- `collection_runs (id PK, command, params JSONB, status, records_collected,
+  error_message, started_at, finished_at)`
+  Məqsəd: hər CLI yazma-çağırışının audit/provenance izi — "bu rəqəm
+  hansı run-dan gəldi" sualının əsası.
+
+- `facts (id PK, source_id FK, run_id FK→collection_runs, concept,
+  indicator_code, country, iso3, period, period_year, value, unit,
+  collected_at)` + index-lər `(concept, iso3, period_year)` və `(run_id)`.
+  Məqsəd: makro göstərici sətirləri (World Bank/Eurostat/IMF + gələcək
+  digər mənbələr). APPEND-ONLY — upsert yoxdur, tarixçə saxlanılır.
+
+- `fx_rates (id PK, source_id FK, run_id FK, currency_code, currency_name,
+  nominal, value_rub, rate_date, collected_at, UNIQUE(currency_code, rate_date))`
+  Məqsəd: CBR-in gündəlik FX snapshot-u. `facts`-a məcburi salınmayıb,
+  çünki bu data-da indicator/country oxu yoxdur və dəyər "revisə"
+  olunmur (hər gün üçün bir dəfəlik snapshot).
+
+- `schema_migrations (version PK, applied_at)` — migration runner-in
+  öz bootstrap etdiyi izləmə cədvəli (`collector/db/migrate.py`-də,
+  `.sql` faylında deyil).
+
+Bu mərhələdə QƏSDƏN YARADILMAYAN cədvəllər: `catalogue_entries`, `concepts`,
+`concept_indicator_map`, `recipes`, ayrıca `provenance` cədvəli, hər hansı
+`vector` sütunu. Səbəb: bunlar hələ mövcud olmayan pipeline mərhələlərinə
+aiddir (bax bölmə 7) — indi yaradılsa, boş/mənasız sütunlarla commit
+olunardı.
+
+
+5. MÖVCUD SOURCE-LAR
+--------------------------------------------------------------------------------
+Hamısı `collector.sources.base.DataSource`-dan miras alır.
+
+CKANSource (collector/sources/ckan_source.py)
+- Nə edir: CKAN protokollu open-data portallarından (opendata.az,
+  data.gov və s.) dataset METADATA-sını toplayır (`package_list` +
+  `package_show`), lisenziyaya görə filtr edir (`require_open_license`),
+  rate-limit tətbiq edir.
+- Format: `fetch()` → `list(self.collect())`, hər element dict:
+  `{source_id, dataset_id, name, title, org, license, license_id,
+  modified, tags, groups, resources}` — birbaşa `datasets` cədvəlinə map olunur.
+
+WorldBankSource (collector/sources/worldbank_source.py)
+- Nə edir: World Bank Open Data API-dən ölkələr/regionlar üzrə göstərici
+  müqayisəsi. `COMMON_INDICATORS` (15 qısa ad → rəsmi kod) xəritəsi var.
+- Format: `fetch()` → `compare(iso3_list, indicator, start_year, end_year)`,
+  hər sətir dict: `{country, iso3, indicator, year, value}`.
+
+EurostatSource (collector/sources/eurostat_source.py)
+- Nə edir: Eurostat REST API (JSON-stat formatı), Avropa ölkələri üçün.
+  Dataset kodları (`une_rt_a` və s.) `config.yaml → concepts`-dən gəlir
+  və faylda AÇIQ ŞƏKİLDƏ "əl ilə query builder-lə yoxlanmalıdır" qeydi var.
+- Format: `fetch()` → `get_indicator(dataset, geo_codes, start_year, end_year)`,
+  hər sətir dict: `{country, iso3, year, value}`.
+
+IMFSource (collector/sources/imf_source.py)
+- Nə edir: IMF SDMX-JSON API, World Bank-a MÜSTƏQİL alternativ mənbə
+  (çarpaz-yoxlama üçün). `list_dataflows()` və `get_series(dataset, key,
+  start_year, end_year)` metodları var.
+- Format: `fetch()` → `get_series(...)`, hər sətir dict:
+  `{country, iso3, year, value}` (`ref_area`-dan çıxarılan kod).
+
+CBRSource (collector/sources/cbr_source.py)
+- Nə edir: Bank of Russia gündəlik valyuta məzənnələri
+  (cbr-xml-daily.ru JSON proxy-i, əsas mənbə cbr.ru).
+- Format: `fetch()` → `get_daily_rates()`, hər sətir dict:
+  `{currency, nominal, value_rub, date, source}` — DİQQƏT: bu forma
+  digər 3 adapterdən FUNDAMENTAL FƏRQLİDİR (indicator/country oxu yoxdur),
+  ona görə `facts`-a YOX, `fx_rates`-ə yazılır. Sinif docstring-ində bu
+  fərq açıq izah olunub.
+
+
+6. QƏBUL EDİLMİŞ ARXİTEKTURA PRİNSİPLƏRİ
+--------------------------------------------------------------------------------
+Bunlar artıq QƏRARLAŞDIRILIB və kodda tətbiq olunub — dəyişdirmədən əvvəl
+əsaslandırma tələb olunur:
+
+- PostgreSQL yeganə application database-dir. SQLite/CSV storage tam
+  silinib, geri qayıtma/compatibility layer yoxdur.
+- pgvector aktivdir, amma indi heç bir `vector` sütun/embedding/semantic-
+  search MƏNTİQİ yoxdur — yalnız infrastruktur hazırlığıdır.
+- AI, deterministic hesablamaları ƏVƏZ ETMİR (məsələn, `value` sütununun
+  hesablanması, unit çevirmə, upsert məntiqi — bunlar həmişə plain SQL/
+  Python-dur, AI-ya verilmir). Bu, arxitektura sənədinin (bölmə 2, Variant
+  C) əsas prinsipidir.
+- CBR FX data-sı `facts`-a MƏCBURİ SALINMIR — fərqli struktur üçün ayrıca
+  `fx_rates` cədvəli var.
+- Web-dən tapılan data AVTOMATIK "official"/"trusted" QƏBUL EDİLMİR —
+  `trust_level` sütununda `unverified_web` dəyəri məhz bunun üçündür
+  (default hər zaman `official` DEYİL, `web discovery` mənbələri
+  `unverified_web` ilə yazılmalıdır — hələ belə mənbə yazan kod yoxdur,
+  amma sxem qaydası budur).
+- Source priority/trust NƏZƏRƏ ALINMALIDIR — `priority_tier` (1-6) və
+  `trust_level` sütunları bunun üçün `sources` cədvəlində var, amma onları
+  OXUYAN/tətbiq edən fallback məntiqi HƏLƏ YAZILMAYIB (bax bölmə 9).
+- Repository funksiyaları COMMIT ETMİR — transaction sərhədi çağıranındır.
+  Bu, real-DB testlərinin rollback-lə izolyasiya olunmasını mümkün edir.
+- `facts` append-only-dur (tarixçə saxlanılır), `fx_rates` upsert-dir
+  (gündəlik snapshot) — bu iki fərqli davranış QƏSDƏNDİR, "bütün cədvəllər
+  eyni upsert qaydasında olmalıdır" fərziyyəsi YANLIŞDIR.
+- Ağır ORM/migration framework (Alembic və s.) istifadə edilmir —
+  server məhdud resurslu (1 vCPU, ~4GB RAM), plain-SQL + sadə runner
+  kifayət qədər güclüdür.
+
+
+7. UZUNMÜDDƏTLİ HƏDƏF ARXİTEKTURA (TƏKLİF, QƏRAR DEYİL)
+--------------------------------------------------------------------------------
+QEYD: bu bölmədəki HAMISI data-platform-arxitektura-tehlili.md sənədindəki
+TƏHLİL/TƏKLİFDİR — heç biri hələ kodda YOXDUR və bölmə 6-dakı kimi "qərar"
+statusunda deyil. Növbəti agent bunları TƏKLİF kimi qəbul etməli, amma
+konkret icra qərarlarını (schema/interfeys) özü təsdiqləməlidir.
+
+- SourceRegistry — `sources` cədvəli üzərində nazik idarəetmə qatı: tanınan
+  (`discovery_method='static'`) və gələcəkdə aşkar edilmiş
+  (`discovery_method='discovered'`) adapter/mənbələri prioritet-sıralı
+  (`priority_tier`) siyahı kimi qaytaracaq. Hazırda bunu əvəz edən
+  `collector/db/repository.py::ensure_static_sources()` var, amma o yalnız
+  4 hardcoded sətir yazır, oxu/sıralama məntiqi yoxdur.
+- Data Catalogue — `catalogue_entries`/`concepts` cədvəlləri (arxitektura
+  sənədi bölmə 4) — hansı mənbədə hansı indicator/dataset olduğunun
+  axtarıla bilən indeksi. Hazırda YOXDUR.
+- Concepts — abstrakt göstərici anlayışı (məs. "gdp_growth"). Hazırda YALNIZ
+  `config.yaml → concepts:` altında qismən, statik, DB-də olmayan formada
+  mövcuddur (3 concept: gdp_growth, unemployment, inflation).
+- Concept → Indicator mapping — hər concept-in hər mənbədəki konkret kodu
+  (bax `config.yaml → concepts:`). Hazırda YAML-da, DB-də deyil, bağlı FK
+  yoxdur.
+- Requirement Parser — təbii dil tələbini concept siyahısına çevirən qat.
+  Hazırda TAM YOXDUR (bu mərhələdə qəsdən qurulmayıb).
+- Source Discovery — fallback zəncirini (bölmə 8) icra edib tapılan
+  mənbələri `sources`-a `discovery_method='discovered'` yazan komponent.
+  Hazırda TAM YOXDUR, yalnız `sources` sxemi buna hazırdır.
+- Web Discovery — Source Discovery-nin son tier-i (rəsmi/beynəlxalq
+  mənbələrdə tapılmadıqda). Nəticələr HEÇ VAXT avtomatik `trust_level=
+  'official'` olmamalıdır (bax bölmə 6). Hazırda TAM YOXDUR.
+- Confidence Gate — ambiguous/aşağı-etibarlı nəticələr üçün insan
+  təsdiqi/əlavə yoxlama tələb edən qapı. Hazırda TAM YOXDUR.
+- Collection Plan — konkret "hansı mənbədən, hansı parametrlə çək" planını
+  strukturlaşdıran JSON sxem (arxitektura sənədi bölmə 9). Hazırda TAM YOXDUR.
+- Validation Engine — vahid/valyuta uyğunsuzluğu, anomaliya, duplikat
+  yoxlaması (arxitektura sənədi bölmə 10). Hazırda YALNIZ `value is None`
+  səviyyəsində minimal yoxlama var (adapter-lərdə), formal engine yoxdur.
+- Recipe Engine — formula-based törəmə metriklər (məs. house affordability
+  = income/house_price). Hazırda TAM YOXDUR.
+- Provenance — "bu rəqəm haradan gəldi" izi. Hazırda `collection_runs` +
+  `facts.run_id`/`fx_rates.run_id` FK-ları ilə QİSMƏN ödənilir (hansı run,
+  nə vaxt) — amma ayrıca formal `provenance` cədvəli/qatı (mənbə seçim
+  səbəbi, confidence skoru və s.) YOXDUR.
+
+
+8. DATA DISCOVERY FALLBACK (TƏKLİF, HƏLƏ QURULMAYIB)
+--------------------------------------------------------------------------------
+Qəbul edilmiş prioritet ardıcıllığı (bu, `sources.priority_tier` sütununun
+1→6 dəyərləri ilə UYĞUNLAŞDIRILIB, `migrations/0001_init.sql` comment-ində
+də qeyd olunub):
+
+    1. AZ rəsmi dövlət mənbələri       (priority_tier = 1)
+    2. Azərbaycan Open Data             (priority_tier = 2)
+    3. digər rəsmi milli mənbələr       (priority_tier = 3)
+    4. beynəlxalq API/open-data         (priority_tier = 4)  — World Bank/Eurostat/IMF hazırda buradadır
+    5. digər public API/dataset         (priority_tier = 5)
+    6. web discovery                    (priority_tier = 6)
+
+QAYDA: web discovery (tier 6) nəticələri AVTOMATIK trusted/official
+QƏBUL EDİLMƏMƏLİDİR — `trust_level='unverified_web'` ilə yazılmalı və
+Confidence Gate/insan təsdiqindən keçmədən son istifadəçiyə "rəsmi rəqəm"
+kimi göstərilməməlidir.
+
+VƏZİYYƏT: bu prioritet SXEMDƏ (sütun səviyyəsində) təmsil olunur, amma
+HEÇ BİR KOD bu tier-lər arasında sıravi "boşdursa növbətiyə keç" məntiqini
+icra ETMİR. Hazırkı 5 adapter (`world_bank`=tier 4, `eurostat`=tier 4,
+`imf`=tier 4, `cbr_russia`=tier 3, CKAN source-ları config.yaml-da tier
+2 və 5) müstəqil çağırılır, aralarında fallback YOXDUR — istifadəçi
+(cli.py vasitəsilə) hansı adapteri işlətdiyini özü seçir.
+
+
+9. NÖVBƏTİ MƏRHƏLƏ
+--------------------------------------------------------------------------------
+Konkret tövsiyə olunan iş sırası (AI/embedding-dən ƏVVƏL):
+
+Phase 2A — SourceRegistry
+  `collector/db/repository.py` üzərində (və ya yeni `collector/registry.py`
+  modulunda) `sources` cədvəlini `priority_tier`-ə görə sıralı oxuyan/
+  yazan nazik qat. Minimum: `list_by_tier(conn, enabled_only=True)`,
+  `register_discovered(conn, ...)`. Sxem DƏYİŞMİR, yalnız oxu/yazı
+  funksiyaları əlavə olunur.
+
+Phase 2B — Concept → Indicator mapping
+  `config.yaml → concepts:`-dəki statik xəritəni DB-yə köçürmək: kiçik
+  `concepts(id, name)` + `concept_indicator_map(concept_id, source_id FK,
+  indicator_code)` cədvəlləri (yeni migration, `0002_...sql`). Məqsəd:
+  "gdp_per_capita" kimi bir konseptin hər mənbədə hansı koda uyğun
+  gəldiyini formal, FK-lı şəkildə saxlamaq — bu, Phase 2C-nin ön şərtidir.
+
+Phase 2C — Deterministic fallback runner
+  Yuxarıdakı 2 tikinti bloku üzərində: tier-sıralı, "ilk uğurlu cavabda
+  dayan" məntiqi. Hələ YALNIZ mövcud 5 adapter arasında (world_bank,
+  eurostat, imf, cbr_russia, CKAN source-ları) — web discovery/LLM YOX.
+  Hər addım `collection_runs`-a "niyə növbəti tier-ə keçildi" qeydi ilə
+  yazılmalıdır (audit).
+
+Bunlardan SONRA (bu mərhələdə deyil): Data Catalogue, AI ambiguity gate
+(Requirement Parser), semantic search (pgvector-un faktiki istifadəsi),
+web discovery, Validation Engine, Recipe Engine — bu ardıcıllıqla,
+arxitektura sənədinin V2/V3 roadmap-ına uyğun.
+
+
+10. IMPORTANT TECHNICAL NOTES
+--------------------------------------------------------------------------------
+- Server məhdud resursludur: Ubuntu 24.04, 1 vCPU, ~4GB RAM. Ağır
+  framework/ORM əlavə etməzdən əvvəl bunu nəzərə al.
+- pgvector superuser məsələsi (bax bölmə 2) — YENİ database yaradılsa,
+  `CREATE EXTENSION vector` addımı manual superuser tələb edəcək,
+  avtomatlaşdırılmayıb.
+- `repository.py` funksiyaları QƏSDƏN commit etmir — yeni funksiya
+  yazarkən bu konvensiyaya sadiq qal (commit çağırana aiddir), əks halda
+  test rollback izolyasiyası pozulacaq.
+- `tests/test_db/*` REAL Postgres-ə qoşulur (mock yoxdur) — bu testləri
+  işlətmək üçün `TEST_DATABASE_URL` işlək database-ə işarə etməlidir
+  (`.env`-də var, `data_collector_test`).
+- `README.md` KÖHNƏLİB — SQLite/CSV storage.backend haqqında yazır, bu
+  artıq doğru deyil (storage.py silinib). Növbəti mərhələdə README
+  yenilənməlidir (bu handoff-un işi deyil, qeyd üçün yazılır).
+- `data-platform-arxitektura-tehlili.md` bir TƏHLİL/TƏKLİF sənədidir,
+  qərar sənədi deyil — ondan gələn hər fikri (bölmə 7/8-də edildiyi kimi)
+  "təklif" statusunda saxla, "artıq qərarlaşdırılıb" ilə qarışdırma.
+- `config.yaml`-dakı `concepts:` bölməsindəki Eurostat/IMF kodları faylın
+  öz commentində "ilkin təxmindir, rəsmi query builder-lə yoxlanmalıdır"
+  deyə qeyd olunub — bunlara etibar etməzdən əvvəl doğrula.
+- opendata.az CKAN API bəzən HTTP 403 qaytarır (əvvəlki canlı testdə
+  müşahidə olunub) — bu, kodun problemi deyil, xarici API-nin
+  anti-bot/bloklama davranışıdır, "0 dataset toplandı" bu halda keçərli
+  (error olmayan) nəticədir.
+- `.claude/` qovluğu (settings.local.json) və `__pycache__/`/`.pytest_cache/`
+  git-ə commit olunmayıb (`.gitignore`-da) — bunlara toxunma.
+
+
+11. GIT
+--------------------------------------------------------------------------------
+Baseline commit (layihənin ORİJİNAL, dəyişdirilməmiş halı):
+
+    247dcd6  Baseline: import current data-collector project as-is
+
+Bundan sonrakı commit-lər (Mərhələ 1, xronoloji sırayla):
+
+    6697ca3  infra: PostgreSQL/pgvector foundation config
+    f69b248  refactor: DataSource ABC, adapter package, DB connection/migration layer
+    75652ba  feat: persist CLI output to PostgreSQL via repository layer
+    1ff2840  test: source-adapter (mocked) and DB-layer (real Postgres) test suites
+
+HEAD hazırda `1ff2840`-dadır (bu handoff yazılan an). Növbəti agent BURADAN
+(HEAD-dən) davam etməlidir — `247dcd6`-a qayıtmaq YALNIZ Mərhələ 1-in
+özündə fundamental bir problem aşkar olunarsa lazımdır (təhlükəsizlik
+checkpoint-i kimi saxlanılıb, adi iş axını üçün deyil).
+
+Working tree bu handoff yaradılan anda TƏMİZDİR (yalnız bu fayl əlavə
+olunur) — `git status --short` ilə yoxla.
+
+
+12. HOW TO CONTINUE
+--------------------------------------------------------------------------------
+Növbəti AI agent bu sənədi oxuduqdan SONRA, kod yazmadan ƏVVƏL bu sıra ilə
+hərəkət etməlidir:
+
+1. `git log --oneline` və `git status --short` ilə repo-nun HƏQİQİ
+   vəziyyətini yoxla — bu sənəddəki commit hash-ləri ilə üst-üstə düşdüyünü
+   təsdiqlə (vaxt keçdikcə yeni commit-lər əlavə olunmuş ola bilər).
+2. Bu handoff sənədini (AI_AGENT_HANDOFF.txt) tam oxu.
+3. `data-platform-arxitektura-tehlili.md`-i oxu (uzunmüddətli TƏKLİF
+   konteksti üçün) — amma bölmə 6/7-dəki "qərar vs təklif" ayrımını unutma.
+4. `migrations/0001_init.sql`, `collector/db/repository.py`,
+   `collector/sources/base.py` və 5 adapter faylını oxuyaraq mövcud kodu
+   DƏYİŞMƏDƏN başa düş.
+5. `pytest` işlədib (və `pytest -m "not db"` / `pytest -m "db"` ayrı-ayrı)
+   testlərin həqiqətən keçdiyini öz mühitində təsdiqlə.
+6. Yalnız bundan sonra — Phase 2A (SourceRegistry) üçün konkret plan
+   hazırla (fayl adları, funksiya siqnaturaları, lazımsa yeni migration
+   nömrəsi) və istifadəçidən təsdiq al ƏVVƏL kod yazmadan.
+================================================================================

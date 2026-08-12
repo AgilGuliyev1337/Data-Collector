@@ -20,10 +20,14 @@ STATIC_SOURCES = [
     {"id": "cbr_russia", "type": "cbr", "base_url": "https://www.cbr-xml-daily.ru",
      "priority_tier": 3, "trust_level": "official"},
     # Phase 3: Azerbaijan official sources
-    {"id": "stat_gov_az", "type": "azstat", "base_url": "https://stat.gov.az",
+    {"id": "stat_gov_az", "type": "stat_gov", "base_url": "https://open.stat.gov.az",
      "priority_tier": 1, "trust_level": "official",
-     "metadata": {"name": "Dövlət Statistika Komitəsi", "has_api": False,
-                  "access_method": "web_download"}},
+     "metadata": {"name": "Dövlət Statistika Komitəsi", "has_api": True,
+                  "access_method": "datastore_api"}},
+    {"id": "manzil_az", "type": "manzil_az", "base_url": "https://manzil.az",
+     "priority_tier": 2, "trust_level": "community",
+     "metadata": {"name": "Manzil.az Əmlak Portalı", "has_api": True,
+                  "access_method": "web_api"}},
     {"id": "cbar_az", "type": "central_bank_az", "base_url": "https://www.cbar.az",
      "priority_tier": 3, "trust_level": "official",
      "metadata": {"name": "Mərkəzi Bank (Azərbaycan)", "has_api": False,
@@ -193,6 +197,9 @@ CONCEPT_DISPLAY_NAMES = {
     "urban_population_pct": "Urban Population Percentage",
     "researchers_per_million": "Researchers Per Million",
     "ease_of_business": "Ease of Doing Business",
+    "maas": "Average Monthly Salary (AZN)",
+    "ev_qiymeti": "Housing Price Per Square Meter (AZN/m²)",
+    "ev_almaq": "Housing Affordability (30% Savings Rule)",
 }
 
 # Config.yaml → concepts bölməsindəki REAL kodlar.
@@ -399,6 +406,98 @@ def ensure_catalogue_and_mapping(conn):
                     """,
                     (concept_id, entry_id, 0.95),
                 )
+
+    # Addım 7: AZ local sources — stat_gov_az (maas, ev_qiymeti)
+    local_indicators = {
+        "maas": {
+            "source": "stat_gov_az",
+            "indicator_code": "salary_wages_azerbaijan",
+            "display": "Orta Aylıq Əmək Haqqı",
+            "unit": "AZN",
+            "frequency": "annual",
+        },
+        "ev_qiymeti": {
+            "source": "stat_gov_az",
+            "indicator_code": "housing_prices_azerbaijan",
+            "display": "Yaşayış Qiymətləri",
+            "unit": "AZN/m²",
+            "frequency": "annual",
+        },
+    }
+    with conn.cursor() as cur:
+        for concept_id, info in local_indicators.items():
+            source_id = info["source"]
+            code = info["indicator_code"]
+            entry_id = _catalogue_entry_id(source_id, code)
+            # Catalogue entry
+            cur.execute(
+                """
+                INSERT INTO catalogue_entries
+                    (entry_id, source_id, dataset_id, indicator_code, title,
+                     description, unit, frequency)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    unit = EXCLUDED.unit,
+                    frequency = EXCLUDED.frequency,
+                    updated_at = now()
+                """,
+                (entry_id, source_id, None, code,
+                 info["display"], f"{source_id}: {info['display']}",
+                 info.get("unit"), info.get("frequency")),
+            )
+
+    # Addım 8: manzil_az (ev_qiymeti)
+    with conn.cursor() as cur:
+        entry_id = _catalogue_entry_id("manzil_az", "manzil_az_listings")
+        cur.execute(
+            """
+            INSERT INTO catalogue_entries
+                (entry_id, source_id, dataset_id, indicator_code, title,
+                 description)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (source_id, indicator_code) DO UPDATE SET
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                updated_at = now()
+            """,
+            (entry_id, "manzil_az", None, "manzil_az_listings",
+             "Manzil.az Əmlak Elanları", "manzil.az real-time listings"),
+        )
+
+    # Addım 9: concept_indicator_map — stat_gov_az
+    with conn.cursor() as cur:
+        for concept_id, info in local_indicators.items():
+            source_id = info["source"]
+            code = info["indicator_code"]
+            entry_id = _catalogue_entry_id(source_id, code)
+            cur.execute(
+                """
+                INSERT INTO concept_indicator_map
+                    (concept_id, entry_id, confidence, match_type)
+                VALUES (%s, %s, %s, 'rule_based')
+                ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+                    confidence = EXCLUDED.confidence,
+                    match_type = EXCLUDED.match_type
+                """,
+                (concept_id, entry_id, 0.85),
+            )
+
+    # Addım 10: concept_indicator_map — manzil_az (ev_qiymeti)
+    with conn.cursor() as cur:
+        entry_id = _catalogue_entry_id("manzil_az", "manzil_az_listings")
+        cur.execute(
+            """
+            INSERT INTO concept_indicator_map
+                (concept_id, entry_id, confidence, match_type)
+            VALUES (%s, %s, %s, 'rule_based')
+            ON CONFLICT (concept_id, entry_id) DO UPDATE SET
+                confidence = EXCLUDED.confidence,
+                match_type = EXCLUDED.match_type
+            """,
+            ("ev_qiymeti", entry_id, 0.80),
+        )
 
 
 # ---------------------------------------------------------------------------
