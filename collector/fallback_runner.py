@@ -34,7 +34,9 @@ from collector.sources.worldbank_source import WorldBankSource
 from collector.sources.eurostat_source import EurostatSource
 from collector.sources.imf_source import IMFSource
 from collector.sources.cbr_source import CBRSource
+from collector.sources.ckan_source import CKANSource
 from collector.db import repository
+from collector.collection import extract_data
 
 logger = logging.getLogger("collector.fallback")
 
@@ -60,7 +62,11 @@ ADAPTER_DISPATCH = {
         "end_year": params["period_end"],
     }),
     "cbr_russia": (CBRSource, lambda entry, params: {}),
-    # CKAN və digərləri: əlavə ediləcək
+    "ckan": (CKANSource, lambda entry, params: {
+        "query": entry.get("keyword", ""),
+        "start": 0,
+        "rows": 100,
+    }),
 }
 
 
@@ -260,10 +266,8 @@ def run_fallback(conn, concept_id, countries, period_start, period_end):
 def _normalize_result(raw_rows, source_id, run_id, concept_id, indicator_code):
     """Adapter-dən gələn raw data-ya facts formatında sətirlər yarat.
 
-    Hər adapterin output formatı fərqlidir — uyğunlaşdırma:
-    - WorldBank: {country, iso3, year, value, indicator}
-    - Eurostat: {country, iso3, year, value, source}
-    - IMF: {iso3, year, value, indicator}
+    collection.extract_data() istifadə edir — hər adapter üçün
+    unified DataPoint yaradır, sonra insert_facts() formatına çevirir.
 
     Args:
         raw_rows: adapter.fetch()-dan gələn siyahı.
@@ -275,17 +279,18 @@ def _normalize_result(raw_rows, source_id, run_id, concept_id, indicator_code):
     Returns:
         insert_facts() formatında [{source_id, run_id, concept, ...}, ...]
     """
-    rows = []
-    for r in raw_rows:
-        rows.append({
-            "source_id": source_id,
+    data_points = extract_data(raw_rows, source_id, indicator_code)
+    return [
+        {
+            "source_id": dp.source_id,
             "run_id": run_id,
             "concept": concept_id,
-            "indicator_code": indicator_code,
-            "country": r.get("country") or r.get("iso3"),
-            "iso3": r.get("iso3") or r.get("country"),
-            "period": str(r.get("year") or r.get("period")),
-            "value": r.get("value"),
-            "unit": r.get("unit"),
-        })
-    return rows
+            "indicator_code": dp.indicator_code,
+            "country": dp.country or dp.iso3,
+            "iso3": dp.iso3,
+            "period": dp.period,
+            "value": dp.value,
+            "unit": dp.unit,
+        }
+        for dp in data_points
+    ]

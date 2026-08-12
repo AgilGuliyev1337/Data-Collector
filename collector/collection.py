@@ -18,12 +18,13 @@ Unified result shape:
 }
 
 Each adapter already returns a slightly different shape. This module:
-1. Calls the adapter via the ADAPTER_DISPATCH
+1. Calls the adapter via the EXTRACTORS dispatch table
 2. Transforms raw adapter output into the unified format
 3. Preserves raw API response in `metadata["_raw"]` for provenance
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -67,63 +68,104 @@ class DataPoint:
 
 
 def extract_worldbank(raw: dict, source_id: str = "world_bank") -> DataPoint:
-    """Extract a unified DataPoint from a World Bank raw row."""
+    """Extract a unified DataPoint from World Bank adapter output.
+
+    Handles both raw API format (nested country/indicator dicts) and
+    adapter-transformed format (flat strings).
+    """
+    # Raw API format: country is {"id": "AZ", "value": "Azerbaijan"}
+    if isinstance(raw.get("country"), dict):
+        country = raw["country"].get("value", "")
+    else:
+        country = raw.get("country", "")
+
+    if isinstance(raw.get("indicator"), dict):
+        indicator = raw["indicator"].get("value", "")
+    else:
+        indicator = raw.get("indicator", "")
+
+    # Raw API has date, adapter-transformed has year
+    date_val = raw.get("date") or raw.get("year")
+
+    # KD check only applies to raw format indicator strings
+    unit = None
+    if indicator:
+        if "GDP" in indicator and "KD" not in indicator:
+            unit = "USD"
+
     return DataPoint(
-        country=raw.get("country", {}).get("value", "") if isinstance(raw.get("country"), dict) else "",
-        iso3=raw.get("countryiso3code"),
-        period=str(raw.get("date", "")),
-        year=raw.get("date"),
+        country=country,
+        iso3=raw.get("countryiso3code") or raw.get("iso3"),
+        period=str(date_val) if date_val else "",
+        year=_to_int(date_val),
         value=_to_float(raw.get("value")),
-        unit="USD" if "GDP" in raw.get("indicator", {}).get("value", "") and "KD" not in raw.get("indicator", {}).get("value", "") else None,
-        indicator_code=raw.get("indicator", {}).get("value", ""),
+        unit=unit,
+        indicator_code=indicator,
         source_id=source_id,
         metadata={"_raw": raw},
     )
 
 
 def extract_eurostat(raw: dict, source_id: str = "eurostat") -> DataPoint:
-    """Extract a unified DataPoint from a Eurostat JSON-stat row."""
+    """Extract a unified DataPoint from Eurostat adapter output."""
     return DataPoint(
-        country=raw.get("geo"),
-        iso3=raw.get("geo"),
-        period=str(raw.get("time")),
-        year=_parse_year_from_time(raw.get("time")),
+        country=raw.get("country") or raw.get("geo"),
+        iso3=raw.get("iso3") or raw.get("geo"),
+        period=str(raw.get("year") or raw.get("time") or ""),
+        year=_parse_year_from_time(raw.get("year") or raw.get("time")),
         value=_to_float(raw.get("value")),
         unit=raw.get("unit"),
-        indicator_code=raw.get("indicator"),
+        indicator_code=raw.get("indicator") or raw.get("dataset"),
         source_id=source_id,
         metadata={"_raw": raw},
     )
 
 
 def extract_imf(raw: dict, source_id: str = "imf") -> DataPoint:
-    """Extract a unified DataPoint from an IMF SDMX row."""
-    obs = raw.get("Obs", {}) if isinstance(raw.get("Obs"), dict) else {}
-    if isinstance(raw.get("Obs"), list):
-        obs = raw["Obs"][0] if raw["Obs"] else {}
+    """Extract a unified DataPoint from IMF adapter output.
+
+    Handles both raw SDMX-JSON format and adapter-transformed format.
+    """
+    # Raw API format: has @REF_AREA, @TIME_PERIOD, @OBS_VALUE
+    if raw.get("@REF_AREA"):
+        country = raw["@REF_AREA"]
+        year = raw["@TIME_PERIOD"]
+        value = raw["@OBS_VALUE"]
+    else:
+        country = raw.get("country") or raw.get("REF_AREA", "")
+        year = raw.get("year") or raw.get("TIME_PERIOD", "")
+        value = raw.get("value") or raw.get("OBS_VALUE")
+
     return DataPoint(
-        country=raw.get("REF_AREA", raw.get("country", "")),
-        iso3=raw.get("REF_AREA"),
-        period=str(raw.get("TIME_PERIOD", raw.get("period", ""))),
-        year=_parse_year_from_time(raw.get("TIME_PERIOD", raw.get("period", ""))),
-        value=_to_float(raw.get("OBS_VALUE")),
-        unit=raw.get("UNIT"),
-        indicator_code=raw.get("INDICATOR", ""),
+        country=country,
+        iso3=country,
+        period=str(year) if year else "",
+        year=_parse_year_from_time(year),
+        value=_to_float(value),
+        unit=raw.get("unit") or raw.get("UNIT"),
+        indicator_code=raw.get("indicator") or raw.get("INDICATOR", ""),
         source_id=source_id,
         metadata={"_raw": raw},
     )
 
 
 def extract_cbr(raw: dict, source_id: str = "cbr_russia") -> DataPoint:
-    """Extract a unified DataPoint from a CBR (Central Bank of Russia) row."""
+    """Extract a unified DataPoint from CBR adapter output."""
+    # CBR adapter returns: {currency, name, nominal, value_rub, date, source}
+    nominal = raw.get("nominal", 1)
+    value_rub = raw.get("value_rub")
+    rate = _to_float(value_rub)
+    if rate is not None and nominal is not None:
+        rate = rate / float(nominal)
+
     return DataPoint(
         country="RU",
         iso3="RUS",
-        period=raw.get("Date", raw.get("date", "")),
-        year=_parse_year_from_time(raw.get("Date", raw.get("date", ""))),
-        value=_to_float(raw.get("Rate", raw.get("value"))),
-        unit=raw.get("Currency"),
-        indicator_code=raw.get("Currency"),
+        period=str(raw.get("date") or raw.get("Date", "")),
+        year=_parse_year_from_time(raw.get("date") or raw.get("Date")),
+        value=rate,
+        unit=raw.get("currency") or raw.get("Currency"),
+        indicator_code=raw.get("currency") or raw.get("Currency"),
         source_id=source_id,
         metadata={"_raw": raw},
     )
@@ -135,7 +177,7 @@ def extract_ckan(raw: dict, source_id: str = "ckan") -> DataPoint:
         country=raw.get("country", "global"),
         iso3=None,
         period=str(raw.get("year", raw.get("period", ""))),
-        year=raw.get("year"),
+        year=_to_int(raw.get("year")),
         value=_to_float(raw.get("value")),
         unit=raw.get("unit"),
         indicator_code=raw.get("indicator_code", ""),
@@ -220,7 +262,6 @@ def _parse_year_from_time(time_val) -> Optional[int]:
     if len(s) == 4 and s.isdigit():
         return int(s)
     # Q1, Q2, Q3, Q4 → return start year
-    import re
     m = re.match(r"(\d{4})\s*[Qq]\d?", s)
     if m:
         return int(m.group(1))

@@ -1,7 +1,7 @@
 """
 Phase 8 — Collection extraction tests.
 
-Validates each extractor produces correct DataPoints from raw adapter output.
+Validates each extractor produces correct DataPoints from adapter output.
 """
 
 import pytest
@@ -81,17 +81,18 @@ class TestParseYear:
 
 
 # ---------------------------------------------------------------------------
-# World Bank extractor
+# World Bank extractor (adapter-transformed format)
 # ---------------------------------------------------------------------------
 
 class TestWorldBank:
     def test_basic(self):
+        # Adapter output (after compare() transform):
         raw = {
-            "country": {"value": "Azerbaijan"},
-            "countryiso3code": "AZE",
-            "date": 2022,
+            "country": "Azerbaijan",
+            "iso3": "AZE",
+            "indicator": "GDP per capita (current US$)",
+            "year": "2022",
             "value": 2.5,
-            "indicator": {"value": "NY.GDP.MKTP.KD.ZG"},
         }
         dp = extract_worldbank(raw)
         assert dp.country == "Azerbaijan"
@@ -99,33 +100,84 @@ class TestWorldBank:
         assert dp.year == 2022
         assert dp.period == "2022"
         assert dp.value == 2.5
-        assert dp.indicator_code == "NY.GDP.MKTP.KD.ZG"
+        assert dp.indicator_code == "GDP per capita (current US$)"
         assert dp.source_id == "world_bank"
         assert "_raw" in dp.metadata
 
+    def test_raw_api_format(self):
+        # Raw API format (nested country/indicator dicts):
+        raw = {
+            "country": {"id": "AZ", "value": "Azerbaijan"},
+            "countryiso3code": "AZE",
+            "date": 2022,
+            "value": 2.5,
+            "indicator": {"id": "NY.GDP.PCAP.CD", "value": "GDP per capita"},
+        }
+        dp = extract_worldbank(raw)
+        assert dp.country == "Azerbaijan"
+        assert dp.iso3 == "AZE"
+        assert dp.year == 2022
+        assert dp.value == 2.5
+        assert dp.indicator_code == "GDP per capita"
+
     def test_null_value(self):
         raw = {
-            "country": {"value": "World"},
-            "countryiso3code": "WLD",
-            "date": 2020,
+            "country": "World",
+            "iso3": "WLD",
+            "year": "2020",
             "value": None,
-            "indicator": {"value": "SP.POP.TOTL"},
+            "indicator": "SP.POP.TOTL",
         }
         dp = extract_worldbank(raw)
         assert dp.value is None
 
     def test_source_id_override(self):
-        raw = {"country": {"value": "X"}, "date": 2021, "value": 1.0, "indicator": {"value": "X"}}
+        raw = {"country": "X", "year": "2021", "value": 1.0, "indicator": "X"}
         dp = extract_worldbank(raw, source_id="custom_wb")
         assert dp.source_id == "custom_wb"
 
+    def test_gdp_kd_unit(self):
+        """GDP not KD → unit=USD; GDP KD → unit=None."""
+        raw = {"country": "X", "year": "2021", "value": 1.0,
+               "indicator": "NY.GDP.MKTP.KD.ZG"}
+        dp = extract_worldbank(raw)
+        assert dp.unit is None  # KD series
+
+        raw2 = {"country": "X", "year": "2021", "value": 1.0,
+                "indicator": "NY.GDP.MKTP.CD"}
+        dp2 = extract_worldbank(raw2)
+        assert dp2.unit == "USD"
+
 
 # ---------------------------------------------------------------------------
-# Eurostat extractor
+# Eurostat extractor (adapter-transformed format)
 # ---------------------------------------------------------------------------
 
 class TestEurostat:
     def test_basic(self):
+        # Adapter output (after get_indicator() transform):
+        raw = {
+            "country": "AZ",
+            "iso3": "AZ",
+            "indicator": "une_rt_a",
+            "year": "2022",
+            "value": "5.2",
+        }
+        dp = extract_eurostat(raw)
+        assert dp.country == "AZ"
+        assert dp.iso3 == "AZ"
+        assert dp.period == "2022"
+        assert dp.year == 2022
+        assert dp.value == 5.2
+        assert dp.indicator_code == "une_rt_a"
+
+    def test_null_value(self):
+        raw = {"country": "EU", "iso3": "EU", "year": "2020", "value": None, "indicator": "xyz"}
+        dp = extract_eurostat(raw)
+        assert dp.value is None
+
+    def test_raw_api_format(self):
+        # Raw JSON-stat API format:
         raw = {
             "geo": "AZ",
             "time": "2022",
@@ -135,32 +187,41 @@ class TestEurostat:
         }
         dp = extract_eurostat(raw)
         assert dp.country == "AZ"
-        assert dp.iso3 == "AZ"
         assert dp.period == "2022"
         assert dp.year == 2022
         assert dp.value == 5.2
         assert dp.unit == "IND"
-        assert dp.indicator_code == "une_rt_a"
-
-    def test_null_value(self):
-        raw = {"geo": "EU", "time": 2020, "value": None, "indicator": "xyz"}
-        dp = extract_eurostat(raw)
-        assert dp.value is None
 
 
 # ---------------------------------------------------------------------------
-# IMF extractor
+# IMF extractor (adapter-transformed format)
 # ---------------------------------------------------------------------------
 
 class TestIMF:
-    def test_dict_obs(self):
+    def test_adapter_format(self):
+        # Adapter output (after get_series() transform):
         raw = {
-            "REF_AREA": "AZE",
-            "TIME_PERIOD": "2022",
-            "OBS_VALUE": 3.1,
+            "country": "AZE",
+            "iso3": "AZE",
+            "indicator": "NGDP_R_XDC",
+            "year": "2022",
+            "value": "3.1",
+        }
+        dp = extract_imf(raw)
+        assert dp.country == "AZE"
+        assert dp.iso3 == "AZE"
+        assert dp.year == 2022
+        assert dp.value == 3.1
+        assert dp.indicator_code == "NGDP_R_XDC"
+
+    def test_raw_api_format(self):
+        # Raw SDMX-JSON format:
+        raw = {
+            "@REF_AREA": "AZE",
+            "@TIME_PERIOD": "2022",
+            "@OBS_VALUE": 3.1,
             "UNIT": "ID",
             "INDICATOR": "NGDP_R_XDC",
-            "Obs": {"OBS_VALUE": 3.1, "TIME_PERIOD": "2022"},
         }
         dp = extract_imf(raw)
         assert dp.country == "AZE"
@@ -169,35 +230,37 @@ class TestIMF:
         assert dp.value == 3.1
         assert dp.unit == "ID"
 
-    def test_list_obs(self):
+    def test_none_value(self):
+        raw = {"country": "X", "iso3": "XXX", "year": "2020", "value": None, "indicator": "X"}
+        dp = extract_imf(raw)
+        assert dp.value is None
+
+    def test_list_obs_raw(self):
+        # Raw API with Obs list (for SDMX response):
         raw = {
-            "REF_AREA": "TUR",
-            "TIME_PERIOD": "2021",
-            "OBS_VALUE": 4.0,
-            "Obs": [{"OBS_VALUE": 4.0, "TIME_PERIOD": "2021"}],
+            "@REF_AREA": "TUR",
+            "@TIME_PERIOD": "2021",
+            "@OBS_VALUE": 4.0,
         }
         dp = extract_imf(raw)
         assert dp.country == "TUR"
         assert dp.value == 4.0
 
-    def test_empty_obs_list(self):
-        raw = {"REF_AREA": "X", "Obs": []}
-        dp = extract_imf(raw)
-        assert dp.value is None
-
-    def test_dict_obs_none_value(self):
-        raw = {"REF_AREA": "X", "Obs": {"OBS_VALUE": None, "TIME_PERIOD": "2020"}}
-        dp = extract_imf(raw)
-        assert dp.value is None
-
 
 # ---------------------------------------------------------------------------
-# CBR extractor
+# CBR extractor (adapter-transformed format)
 # ---------------------------------------------------------------------------
 
 class TestCBR:
     def test_basic(self):
-        raw = {"Date": "2023-08-01", "Rate": 83.50, "Currency": "USD"}
+        # Adapter output (after get_daily_rates() transform):
+        raw = {
+            "currency": "USD",
+            "name": "US Dollar",
+            "nominal": 1,
+            "value_rub": 83.50,
+            "date": "2023-08-01",
+        }
         dp = extract_cbr(raw)
         assert dp.country == "RU"
         assert dp.iso3 == "RUS"
@@ -208,9 +271,16 @@ class TestCBR:
         assert dp.indicator_code == "USD"
 
     def test_null_rate(self):
-        raw = {"Date": "2023-08-01", "Rate": None, "Currency": "EUR"}
+        raw = {"currency": "EUR", "name": "Euro", "nominal": 1,
+               "value_rub": None, "date": "2023-08-01"}
         dp = extract_cbr(raw)
         assert dp.value is None
+
+    def test_nominal_division(self):
+        raw = {"currency": "EUR", "name": "Euro", "nominal": 5,
+               "value_rub": 417.5, "date": "2023-08-01"}
+        dp = extract_cbr(raw)
+        assert dp.value == 83.50  # 417.5 / 5
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +317,8 @@ class TestCKAN:
 
 class TestExtractData:
     def test_world_bank(self):
-        rows = [{"country": {"value": "AZ"}, "countryiso3code": "AZE",
-                 "date": 2022, "value": 2.5, "indicator": {"value": "NY.GDP.MKTP.KD.ZG"}}]
+        rows = [{"country": "AZ", "iso3": "AZE",
+                 "year": "2022", "value": 2.5, "indicator": "X"}]
         points = extract_data(rows, "world_bank", "NY.GDP.MKTP.KD.ZG")
         assert len(points) == 1
         assert points[0].indicator_code == "NY.GDP.MKTP.KD.ZG"
@@ -265,10 +335,8 @@ class TestExtractData:
 
     def test_multiple_rows(self):
         rows = [
-            {"country": {"value": "AZ"}, "countryiso3code": "AZE",
-             "date": 2021, "value": 1.0, "indicator": {"value": "X"}},
-            {"country": {"value": "AZ"}, "countryiso3code": "AZE",
-             "date": 2022, "value": 2.0, "indicator": {"value": "X"}},
+            {"country": "AZ", "iso3": "AZE", "year": "2021", "value": 1.0, "indicator": "X"},
+            {"country": "AZ", "iso3": "AZE", "year": "2022", "value": 2.0, "indicator": "X"},
         ]
         points = extract_data(rows, "world_bank", "X")
         assert len(points) == 2
