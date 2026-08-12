@@ -173,3 +173,72 @@ def get_candidate_indicators(conn, concept_id):
         cur.execute(query, (concept_id,))
         rows = cur.fetchall()
     return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------
+# Phase 3: Azerbaijan Static Sources Seed
+# ---------------------------------------------------------------
+
+# StatKom (Dövlət Statistika Komitəsi) — real source, amma public API yoxdur.
+# Məlumat yalnız Excel/CSV download və ya data request ilə əldə edilir.
+# Bu entry gələcəkdə web extraction üçün əlavə olunub.
+AZERBAIJAN_SOURCES = {
+    "stat_gov_az": {
+        "type": "azstat",
+        "base_url": "https://stat.gov.az",
+        "priority_tier": 1,
+        "trust_level": "official",
+        "metadata": {
+            "name": "Dövlət Statistika Komitəsi",
+            "has_api": False,
+            "access_method": "web_download",
+            "description": "Statistical data available via web download (Excel/CSV). No public REST API.",
+        },
+    },
+    "cbar_az": {
+        "type": "central_bank_az",
+        "base_url": "https://www.cbar.az",
+        "priority_tier": 3,
+        "trust_level": "official",
+        "metadata": {
+            "name": "Mərkəzi Bank (Azərbaycan)",
+            "has_api": False,
+            "access_method": "web_download",
+            "description": "Economic statistics available as PDF/Excel files. Open Banking API exists but is for financial institutions, not public stats.",
+        },
+    },
+    "opendata_az": {
+        "type": "ckan",
+        "base_url": "https://admin.opendata.az",
+        "priority_tier": 2,
+        "trust_level": "official",
+        "metadata": {
+            "name": "Azərbaycan Open Data Portalı",
+            "has_api": True,
+            "api_type": "ckan",
+            "dataset_count": 728,
+            "contributor_count": 25,
+            "description": "Official state open data platform. CKAN-based API available. 246 datasets from State Statistics Committee.",
+        },
+    },
+}
+
+
+def ensure_azerbaijan_sources(conn):
+    """Azərbaycana aid static source-ları `sources` cədvəlinə əlavə et.
+
+    Hər source idempotent şəkildə əlavə olunur (ON CONFLICT skip).
+    Commit etmir.
+    """
+    from collector.db.repository import upsert_source
+    for source_id, source_cfg in AZERBAIJAN_SOURCES.items():
+        upsert_source(
+            conn,
+            id=source_id,
+            type=source_cfg["type"],
+            base_url=source_cfg.get("base_url", ""),
+            priority_tier=source_cfg.get("priority_tier"),
+            trust_level=source_cfg.get("trust_level", "unverified_web"),
+            enabled=source_cfg.get("enabled", True),
+            metadata=source_cfg.get("metadata", {}),
+        )

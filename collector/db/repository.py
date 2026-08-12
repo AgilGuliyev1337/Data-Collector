@@ -19,6 +19,19 @@ STATIC_SOURCES = [
      "priority_tier": 4, "trust_level": "official"},
     {"id": "cbr_russia", "type": "cbr", "base_url": "https://www.cbr-xml-daily.ru",
      "priority_tier": 3, "trust_level": "official"},
+    # Phase 3: Azerbaijan official sources
+    {"id": "stat_gov_az", "type": "azstat", "base_url": "https://stat.gov.az",
+     "priority_tier": 1, "trust_level": "official",
+     "metadata": {"name": "Dövlət Statistika Komitəsi", "has_api": False,
+                  "access_method": "web_download"}},
+    {"id": "cbar_az", "type": "central_bank_az", "base_url": "https://www.cbar.az",
+     "priority_tier": 3, "trust_level": "official",
+     "metadata": {"name": "Mərkəzi Bank (Azərbaycan)", "has_api": False,
+                  "access_method": "web_download"}},
+    {"id": "opendata_az", "type": "ckan", "base_url": "https://admin.opendata.az",
+     "priority_tier": 2, "trust_level": "official",
+     "metadata": {"name": "Azərbaycan Open Data Portalı", "has_api": True,
+                  "api_type": "ckan"}},
 ]
 
 
@@ -49,12 +62,14 @@ def upsert_source(conn, id, type, base_url=None, discovery_method="static",
 
 
 def ensure_static_sources(conn):
-    """world_bank/eurostat/imf/cbr_russia - config.yaml-da 'sources:' altında
-    olmayan, kod-daxili tanınan 4 makro mənbə. FK bütövlüyü üçün lazımdır."""
+    """world_bank/eurostat/imf/cbr_russia + Phase 3 Azerbaijan static source-ları.
+    Config.yaml-da 'sources:' altında olmayan, kod-daxili tanınan mənbələr.
+    FK bütövlüyü üçün lazımdır."""
     for s in STATIC_SOURCES:
         upsert_source(conn, s["id"], s["type"], base_url=s["base_url"],
                       discovery_method="static", priority_tier=s["priority_tier"],
-                      trust_level=s["trust_level"])
+                      trust_level=s["trust_level"],
+                      metadata=s.get("metadata"))
 
 
 def upsert_dataset(conn, record: dict):
@@ -247,9 +262,10 @@ def ensure_catalogue_and_mapping(conn):
     1. Config.yaml-dan 3 konsept → world_bank + eurostat mapping-ləri
     2. World Bank COMMON_INDICATORS-dan 15 konsept → world_bank mapping-ləri
        (config.yaml-dakı 3 konsept WB ilə üst-üstə düşür → idempotent)
+    3. Phase 3: Azərbaycan statik source-ları (FK asılılığı üçün)
 
     İDEMPOTENT: ON CONFLICT DO UPDATE ilə təhlükəsiz təkrar çağırış.
-    sources cədvəlinə world_bank/eurostat statik sətirlərini də yaradır
+    sources cədvəlinə world_bank/eurostat + AZ statik sətirlərini də yaradır
     (FK asılılığı üçün — mövcuddursa skip).
 
     Hər addım AYRI cursor-da işlənir: PostgreSQL-də bir INSERT xəta versə belə
