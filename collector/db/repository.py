@@ -484,9 +484,8 @@ def link_concept_to_entry(conn, concept_id, entry_id, confidence, match_type="ru
     """INSERT INTO concept_indicator_map ON CONFLICT → skip if new confidence < existing.
 
     ON CONFLICT (concept_id, entry_id) DO UPDATE SET
-        confidence = CASE WHEN EXCLUDED.confidence > confidence
-                         THEN EXCLUDED.confidence ELSE confidence END,
-        match_type = EXCLUDED.match_type
+        confidence and match_type ONLY when EXCLUDED.confidence > existing.
+        This prevents downgrades from both confidence and match_type.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -498,7 +497,9 @@ def link_concept_to_entry(conn, concept_id, entry_id, confidence, match_type="ru
                 confidence = CASE WHEN EXCLUDED.confidence > concept_indicator_map.confidence
                                   THEN EXCLUDED.confidence
                                   ELSE concept_indicator_map.confidence END,
-                match_type = EXCLUDED.match_type
+                match_type = CASE WHEN EXCLUDED.confidence > concept_indicator_map.confidence
+                                  THEN EXCLUDED.match_type
+                                  ELSE concept_indicator_map.match_type END
             """,
             (concept_id, entry_id, confidence, match_type),
         )
