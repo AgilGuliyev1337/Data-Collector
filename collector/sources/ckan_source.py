@@ -142,37 +142,65 @@ class CKANSource(DataSource):
         Discover all datasets from this CKAN portal.
 
         Uses package_search (paginated) since package_list may return 403.
+        package_search returns full package objects (no extra API calls needed).
         Returns catalogue_entry-compatible dicts, one per dataset.
         """
-        # Try package_list first (fast, no pagination). If 403 falls through
-        # to _api_get returning {}, fall back to package_search.
-        names = self.list_package_names()
-        if not names:
-            logger.info("[%s] package_list boş/403, package_search-a keçir", self.id)
-            names = self.list_package_names_via_search()
+        # Use package_search directly — it returns full package objects
+        # (title, notes, tags, resources, etc.) so we don't need package_show.
+        pkg_search_params = {"q": "", "rows": self.PAGE_SIZE, "start": 0}
+        result = self._api_get("package_search", pkg_search_params)
+        if not result or not isinstance(result, dict):
+            logger.warning("[%s] package_search uğursuz", self.id)
+            return []
 
-        logger.info("[%s] Kataloqda %d dataset tapıldı (discover)", self.id, len(names))
+        total = result.get("count", 0)
+        results = result.get("results", [])
 
+        if not results and total == 0:
+            logger.info("[%s] package_search: 0 dataset", self.id)
+            return []
+
+        # If more than one page, paginate
+        all_pages: list[dict] = list(results)
+        current_start = len(results)
+        while current_start < total:
+            page = self._api_get("package_search", {
+                "q": "", "rows": self.PAGE_SIZE, "start": current_start,
+            })
+            if not page or not page.get("results"):
+                break
+            all_pages.extend(page["results"])
+            current_start += len(page["results"])
+            if current_start >= total:
+                break
+
+        logger.info("[%s] package_search: %d / %d dataset tapıldı (discover)",
+                     self.id, len(all_pages), total)
+
+        # Build entry_id from id (UUID) if available, otherwise from name
+        seen_ids: set[str] = set()
         entries: list[dict] = []
-        for name in names:
-            pkg = self.get_package(name)
-            if not pkg:
-                continue
+        for pkg in all_pages:
+            pkg_id = pkg.get("id", "")
+            pkg_name = pkg.get("name", "")
 
-            # Filter if configured
-            if not self._passes_filter(pkg):
-                continue
+            # Unique entry_id: source_id + dataset id (or name as fallback)
+            if pkg_id and pkg_id not in seen_ids:
+                entry_id = f"{self.id}:{pkg_id}"
+                seen_ids.add(pkg_id)
+            else:
+                entry_id = f"{self.id}:{pkg_name}"
 
             # Extract resources info for methodology_note
             resources = pkg.get("resources", [])
             resource_urls = [r.get("url") for r in resources if r.get("url")]
             methodology_note = "; ".join(resource_urls) if resource_urls else None
 
-            # Extract time coverage from metadata fields if available
+            # Extract time coverage from package metadata
             time_start = pkg.get("temporal_start") or None
             time_end = pkg.get("temporal_end") or None
 
-            # Extract country coverage from tags or metadata
+            # Extract country coverage from tags
             country_coverage = []
             for tag in (pkg.get("tags") or []):
                 tag_name = (tag.get("name") or "").lower()
@@ -181,12 +209,12 @@ class CKANSource(DataSource):
                     break  # only add AZ once
 
             entry = {
-                "entry_id": f"{self.id}:{pkg.get('id', name)}",
+                "entry_id": entry_id,
                 "source_id": self.id,
-                "dataset_id": pkg.get("id"),
-                "indicator_code": pkg.get("name", name),
-                "title": pkg.get("title") or name,
-                "description": pkg.get("notes") or pkg.get("description") or "",
+                "dataset_id": pkg_id or pkg_name,
+                "indicator_code": pkg_name,
+                "title": pkg.get("title") or pkg_name,
+                "description": pkg.get("notes") or "",
                 "unit": None,
                 "frequency": None,
                 "country_coverage": country_coverage,
