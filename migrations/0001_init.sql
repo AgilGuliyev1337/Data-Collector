@@ -1,12 +1,4 @@
 -- Mərhələ 1: PostgreSQL təməli.
---
--- Qeyd (pgvector): bu server-də `postgresql-16-pgvector` paketi extension-i
--- "trusted" kimi qeyd etmir, ona görə CREATE EXTENSION superuser tələb edir.
--- Bunu tətbiq rolu (collector) əvəzinə DB admin bir dəfə əl ilə icra edib:
---   sudo -u postgres psql -d <dbname> -c "CREATE EXTENSION IF NOT EXISTS vector;"
--- Əgər artıq yaradılıbsa, aşağıdaki IF NOT EXISTS permission yoxlamasından
--- əvvəl no-op olaraq keçir və collector rolu ilə də problemsiz işləyir.
-CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Mənbələrin kataloqu (əvvəlcədən tanınan "static" + gələcək
 -- SourceDiscovery tərəfindən tapılacaq "discovered" sətirlər üçün ortaq yer).

@@ -1,19 +1,84 @@
-# Universal Open-Data Collector
+# Data Collector
 
-CKAN əsaslı açıq-data portallarından (opendata.az, data.gov, opendata.swiss və s.)
-avtomatik dataset toplayan, konfiqurasiya əsaslı tool.
+Natural-dil sorğu ilə iqtisadi/statistik göstəriciləri (ÜDM, maaş, ev qiyməti,
+işsizlik və s.) toplayan Streamlit tətbiqi. World Bank, Eurostat, IMF, CBR,
+STAT.GOV.AZ, Manzil.az kimi rəsmi mənbələrdən axtarır; heç biri tapmasa
+DuckDuckGo ilə internetdən axtarıb tapdığı rəqəmləri mənbə linki və
+etibarlılıq balı ilə göstərir. Bütün nəticələr PostgreSQL-də saxlanılır.
 
-**Fəlsəfə:** yeni mənbə əlavə etmək üçün kod yazmırsan — sadəcə `config.yaml`-a
-yeni `base_url` əlavə edirsən, tool avtomatik həmin portalın bütün açıq
-lisenziyalı datasetlərini tapıb toplayır.
+## Quraşdırma və işə salma
 
-## Quraşdırma
+Tələb olunur: Python 3.10+, PostgreSQL 13+ (və ya Docker).
+
+### 1. Postgres — Docker ilə (ən asan yol)
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+docker compose up -d
 ```
+
+Bu, `collector` istifadəçisi və `data_collector` + `data_collector_test`
+bazaları ilə hazır Postgres konteyneri qaldırır — heç bir əlavə addım lazım
+deyil, aşağıdaki `.env` faylı bununla birbaşa uyğundur.
+
+**Docker yoxdursa** — öz Postgres serverində əl ilə yarat:
+
+```bash
+sudo -u postgres createuser collector -P   # parol soruşacaq
+sudo -u postgres createdb data_collector -O collector
+sudo -u postgres createdb data_collector_test -O collector
+```
+
+### 2. Python asılılıqları
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+### 3. `.env` faylı
+
+```bash
+cp .env.example .env
+```
+
+Docker yolu ilə getmisənsə `.env.example`-dəki dəyərlər dəyişmədən işləyir.
+Əl ilə Postgres qurmusansa, `.env`-dəki `CHANGE_ME`-ni öz parolunla əvəz et.
+
+### 4. Sxemi qur (migration-lar)
+
+```bash
+.venv/bin/python -m collector.db.migrate
+```
+
+İkinci dəfə çağırsan heç nə dəyişmir (idempotent) — təhlükəsiz təkrar
+işlədilə bilər.
+
+### 5. Tətbiqi işə sal
+
+```bash
+.venv/bin/streamlit run app.py --server.port 8501
+```
+
+Brauzerdə `http://localhost:8501` açılacaq. Sorğu qutusuna məs.
+`"Azərbaycanda orta maaş 2023"` yaz və "Sorghu islet" düyməsinə bas.
+
+### Testlərin işlədilməsi
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+(`@pytest.mark.api_connectivity` işarəli testlər canlı internet çağırışı
+edir — şəbəkə/sandbox məhdudiyyəti olan mühitlərdə uğursuz ola bilər, bu
+kodun problemi deyil.)
+
+---
+
+## Əlavə: köhnə CLI alətləri (legacy)
+
+Aşağıdaki `cli.py` + `config.yaml` əsaslı alətlər layihənin ilkin
+fazasından qalıb — CKAN portallarından statik dataset toplamaq üçündür.
+Əsas məhsul yuxarıdaki Streamlit tətbiqidir, amma bu alətlər də işləyir.
 
 ## İstifadə
 

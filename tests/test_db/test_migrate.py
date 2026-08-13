@@ -34,13 +34,3 @@ def test_all_expected_tables_exist_after_migration():
         assert EXPECTED_TABLES.issubset(tables)
     finally:
         conn.close()
-
-
-def test_pgvector_extension_is_enabled():
-    conn = get_connection(test=True)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT extname FROM pg_extension WHERE extname = 'vector'")
-            assert cur.fetchone() is not None
-    finally:
-        conn.close()
