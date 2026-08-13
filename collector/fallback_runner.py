@@ -37,6 +37,7 @@ from collector.sources.cbr_source import CBRSource
 from collector.sources.ckan_source import CKANSource
 from collector.sources.stat_gov_az_source import STATGOVSource
 from collector.sources.manzil_az_source import ManzilAzSource
+from collector.sources.internet_source import InternetSource
 from collector.db import repository
 from collector.collection import extract_data
 
@@ -80,6 +81,12 @@ ADAPTER_DISPATCH = {
         "period_start": params["period_start"],
         "period_end": params["period_end"],
         "district": entry.get("district"),
+    }),
+    "internet": (InternetSource, lambda entry, params: {
+        "concept": entry.get("indicator_code", ""),
+        "countries": params["countries"],
+        "period_start": params["period_start"],
+        "period_end": params["period_end"],
     }),
 }
 

@@ -37,9 +37,10 @@ def test_ensure_static_sources_creates_all_known_sources(db_conn):
         cur.execute("SELECT id, discovery_method FROM sources ORDER BY id")
         rows = cur.fetchall()
     ids = {r[0] for r in rows}
-    # Phase 2A: 4 global + Phase 3: 3 Azerbaijan
+    # Phase 2A: 4 global + Phase 3: 3 Azerbaijan + manzil_az + internet_search
     assert ids == {"world_bank", "eurostat", "imf", "cbr_russia",
-                   "stat_gov_az", "opendata_az", "cbar_az"}
+                   "stat_gov_az", "opendata_az", "cbar_az",
+                   "manzil_az", "internet_search"}
     assert all(r[1] == "static" for r in rows)
 
 

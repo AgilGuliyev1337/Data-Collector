@@ -81,6 +81,18 @@ col3.metric("Keyfiyyət", r["cross_source_quality"]["quality"].upper())
 
 st.divider()
 
+# Internet hasilati barədə xəbərdarlıq
+internet_results = [item for item in r.get("results", []) 
+                    if item.get("source_type") == "internet" or item.get("_confidence", 0.9) < 0.85]
+if internet_results:
+    st.warning(f"{len(internet_results)} netice internetdən tapılıb — etibarlılığını yoxlayın.")
+    # Show source URLs for internet results
+    with st.expander("Mənblərin linkləri", expanded=False):
+        for item in internet_results:
+            url = item.get("_source_url")
+            if url:
+                st.markdown(f"- [{url}]({url})")
+
 # Parsed info
 st.subheader("Parsed")
 st.json(r["parsed"], expanded=False)
@@ -92,19 +104,22 @@ if r["results"]:
 
     rows = []
     for item in r["results"]:
+        # Detect internet-sourced data (check _confidence < 0.85 or source_type == 'internet')
+        is_internet = item.get("source_type") == "internet" or item.get("_confidence", 0.9) < 0.85
         rows.append({
             "Indicator": item.get("indicator_code", ""),
-            "Menbe": item.get("source_id", ""),
-            "Olkə": item.get("country", ""),
+            "Mənbe": item.get("source_id", ""),
+            "Ölkə": item.get("country", ""),
             "Dövr": item.get("period", item.get("year", "")),
-            "Deyer": item.get("value", ""),
+            "Dəyər": item.get("value", ""),
             "Status": item.get("status", ""),
+            "Tip": "🔍 İnternet" if is_internet else "💾 Bazadan",
         })
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     # JSON toggle
     with st.expander("Tam JSON cavab", expanded=False):
-        st.json(r, default_closed=True)
+        st.json(r, expanded=False)
 else:
     st.info("Hech bir netice tapilmadi. Daha spesifik sorghi sınayın.")

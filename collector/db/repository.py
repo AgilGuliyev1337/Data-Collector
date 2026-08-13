@@ -36,6 +36,10 @@ STATIC_SOURCES = [
      "priority_tier": 2, "trust_level": "official",
      "metadata": {"name": "Azərbaycan Open Data Portalı", "has_api": True,
                   "api_type": "ckan"}},
+    {"id": "internet_search", "type": "internet_search", "base_url": None,
+     "priority_tier": 6, "trust_level": "unverified_web",
+     "metadata": {"name": "İnternet axtarışı (DuckDuckGo)", "has_api": False,
+                  "access_method": "web_search"}},
 ]
 
 
@@ -124,7 +128,8 @@ def finish_collection_run(conn, run_id: int, status: str, records_collected: int
 
 
 def insert_facts(conn, rows: list):
-    """rows: [{source_id, run_id, concept, indicator_code, country, iso3, period, value, unit}, ...]
+    """rows: [{source_id, run_id, concept, indicator_code, country, iso3, period, value, unit,
+              source_url, evidence, confidence}, ...] (son 3-ü optional, internet mənbələri üçün)
     Append-only - eyni (concept, country, period) üçün yeni sətir tarixçə kimi əlavə olunur."""
     if not rows:
         return
@@ -133,6 +138,7 @@ def insert_facts(conn, rows: list):
             r["source_id"], r.get("run_id"), r["concept"], r.get("indicator_code"),
             r.get("country"), r.get("iso3"), r.get("period"), _period_year(r.get("period")),
             r.get("value"), r.get("unit"),
+            r.get("source_url"), r.get("evidence"), r.get("confidence"),
         )
         for r in rows
     ]
@@ -140,7 +146,8 @@ def insert_facts(conn, rows: list):
         psycopg2.extras.execute_values(
             cur,
             """
-            INSERT INTO facts (source_id, run_id, concept, indicator_code, country, iso3, period, period_year, value, unit)
+            INSERT INTO facts (source_id, run_id, concept, indicator_code, country, iso3, period, period_year, value, unit,
+                                source_url, evidence, confidence)
             VALUES %s
             """,
             values,

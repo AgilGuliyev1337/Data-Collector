@@ -82,31 +82,75 @@ def run_query(
     attempts_summary: list[dict] = []
     run_id = None
 
-    if concept_id:
-        candidates = plan_dict.get("candidates", []) if plan_dict else []
+    candidates = plan_dict.get("candidates", []) if plan_dict else []
+    result: dict = {}
 
-        if candidates:
-            result = run_fallback(
-                conn,
-                concept_id=concept_id,
-                countries=countries,
-                period_start=period_start,
-                period_end=period_end,
+    if concept_id and candidates:
+        result = run_fallback(
+            conn,
+            concept_id=concept_id,
+            countries=countries,
+            period_start=period_start,
+            period_end=period_end,
+        )
+
+        run_id = result.get("run_id")
+        attempts_summary = result.get("attempts", [])
+
+        if result.get("success") and result.get("records"):
+            # Step 5: Extract DataPoints
+            tracker = ProvenanceTracker(run_id=run_id, source_id=result.get("selected_source", ""))
+            points = extract_with_trace(
+                result["records"],
+                result.get("selected_source", ""),
+                concept_id,
+                tracker,
             )
+            all_data_points.extend(points)
 
-            run_id = result.get("run_id")
-            attempts_summary = result.get("attempts", [])
+    # --- Internet fallback: if DB failed completely (or no concept resolved), try web search ---
+    if not result.get("success") or not result.get("records"):
+        logger.info("Bütün mənbələr uğursuz, internetdən axtarılır...")
+        from collector.internet_search import search_internet
+        internet_records = search_internet(
+            concept_id=concept_id,
+            countries=countries,
+            period_start=period_start,
+            period_end=period_end,
+            raw_query=query_text,
+        )
+        if internet_records:
+            tracker = ProvenanceTracker(run_id=run_id, source_id="internet_search")
+            internet_points = extract_with_trace(
+                internet_records, "internet_search", concept_id, tracker,
+            )
+            all_data_points.extend(internet_points)
+            attempts_summary.append({
+                "source_id": "internet_search",
+                "indicator_code": concept_id,
+                "status": "success" if internet_records else "empty",
+                "records_count": len(internet_records),
+            })
 
-            if result.get("success") and result.get("records"):
-                # Step 5: Extract DataPoints
-                tracker = ProvenanceTracker(run_id=run_id, source_id=result.get("selected_source", ""))
-                points = extract_with_trace(
-                    result["records"],
-                    result.get("selected_source", ""),
-                    concept_id,
-                    tracker,
-                )
-                all_data_points.extend(points)
+            from collector.db import repository
+            facts_rows = [
+                {
+                    "source_id": "internet_search",
+                    "run_id": run_id,
+                    "concept": concept_id,
+                    "indicator_code": rec.get("indicator_code", concept_id),
+                    "country": rec.get("country"),
+                    "iso3": rec.get("iso3"),
+                    "period": rec.get("period"),
+                    "value": rec.get("value"),
+                    "unit": rec.get("unit"),
+                    "source_url": rec.get("_source_url"),
+                    "evidence": rec.get("_source_title"),
+                    "confidence": rec.get("_confidence", 0.55),
+                }
+                for rec in internet_records
+            ]
+            repository.insert_facts(conn, facts_rows)
 
     # Step 6: Normalize
     from collector.normalization import normalize_all
@@ -152,6 +196,8 @@ def run_query(
             "derived": derived,
             "provenance": provenance[-3:],  # Last 3 transformations
             "cross_source_consensus": None,  # Set below
+            "_source_url": dp.metadata.get("_raw", {}).get("_source_url"),
+            "_confidence": dp.metadata.get("_raw", {}).get("_confidence", 0.90),
         })
 
     return {
@@ -213,31 +259,75 @@ class Orchestrator:
         run_id = None
         attempts_summary = []
 
-        if concept_id:
-            candidates = plan_dict.get("candidates", [])
-            if candidates:
-                result = run_fallback(
-                    self.conn,
-                    concept_id=concept_id,
-                    countries=countries,
-                    period_start=period_start,
-                    period_end=period_end,
-                )
-                run_id = result.get("run_id")
-                attempts_summary = result.get("attempts", [])
+        candidates = plan_dict.get("candidates", []) if plan_dict else []
+        result: dict = {}
+        if concept_id and candidates:
+            result = run_fallback(
+                self.conn,
+                concept_id=concept_id,
+                countries=countries,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            run_id = result.get("run_id")
+            attempts_summary = result.get("attempts", [])
 
-                if result.get("success") and result.get("records"):
-                    tracker = ProvenanceTracker(
-                        run_id=run_id,
-                        source_id=result.get("selected_source", ""),
-                    )
-                    points = extract_with_trace(
-                        result["records"],
-                        result.get("selected_source", ""),
-                        concept_id,
-                        tracker,
-                    )
-                    all_data_points.extend(points)
+            if result.get("success") and result.get("records"):
+                tracker = ProvenanceTracker(
+                    run_id=run_id,
+                    source_id=result.get("selected_source", ""),
+                )
+                points = extract_with_trace(
+                    result["records"],
+                    result.get("selected_source", ""),
+                    concept_id,
+                    tracker,
+                )
+                all_data_points.extend(points)
+
+        # --- Internet fallback: DB failed (or no concept resolved), try web search ---
+        if not result.get("success") or not result.get("records"):
+            logger.info("Bütün mənbələr uğursuz, internetdən axtarılır...")
+            from collector.internet_search import search_internet
+            internet_records = search_internet(
+                concept_id=concept_id,
+                countries=countries,
+                period_start=period_start,
+                period_end=period_end,
+                raw_query=parsed_result.get("text", ""),
+            )
+            if internet_records:
+                tracker = ProvenanceTracker(run_id=run_id, source_id="internet_search")
+                internet_points = extract_with_trace(
+                    internet_records, "internet_search", concept_id, tracker,
+                )
+                all_data_points.extend(internet_points)
+                attempts_summary.append({
+                    "source_id": "internet_search",
+                    "indicator_code": concept_id,
+                    "status": "success" if internet_records else "empty",
+                    "records_count": len(internet_records),
+                })
+
+                from collector.db import repository
+                facts_rows = [
+                    {
+                        "source_id": "internet_search",
+                        "run_id": run_id,
+                        "concept": concept_id,
+                        "indicator_code": rec.get("indicator_code", concept_id),
+                        "country": rec.get("country"),
+                        "iso3": rec.get("iso3"),
+                        "period": rec.get("period"),
+                        "value": rec.get("value"),
+                        "unit": rec.get("unit"),
+                        "source_url": rec.get("_source_url"),
+                        "evidence": rec.get("_source_title"),
+                        "confidence": rec.get("_confidence", 0.55),
+                    }
+                    for rec in internet_records
+                ]
+                repository.insert_facts(self.conn, facts_rows)
 
         # Normalize
         from collector.normalization import normalize_all
@@ -280,6 +370,8 @@ class Orchestrator:
                 "derived": derived,
                 "provenance": provenance[-3:],
                 "cross_source_consensus": None,
+                "_source_url": dp.metadata.get("_source_url"),
+                "_confidence": dp.metadata.get("_confidence", 0.90),
             })
 
         return {
